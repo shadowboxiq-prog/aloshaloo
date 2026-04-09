@@ -59,7 +59,7 @@ export default function Auth() {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.headerContainer}>
-          <Ionicons name="chatbubbles" size={80} color="#4F46E5" />
+          <Ionicons name="chatbubbles" size={90} color="#38BDF8" />
           <Text style={styles.title}>{isLogin ? 'تسجيل الدخول' : 'حساب جديد'}</Text>
           <Text style={styles.subtitle}>
             {isLogin ? 'مرحباً بعودتك! الرجاء إدخال بياناتك' : 'انضم إلينا الآن وتواصل مع أصدقائك'}
@@ -134,7 +134,7 @@ export default function Auth() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#0F172A',
   },
   scrollContainer: {
     flexGrow: 1,
@@ -146,59 +146,65 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#111827',
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#F8FAFC',
     marginTop: 16,
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: '#94A3B8',
     textAlign: 'center',
+    lineHeight: 24,
   },
   formContainer: {
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    borderRadius: 24,
+    backgroundColor: '#1E293B',
+    padding: 28,
+    borderRadius: 32,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.4,
+    shadowRadius: 30,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
   inputContainer: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#0F172A',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    marginBottom: 16,
+    borderColor: '#334155',
+    borderRadius: 18,
+    marginBottom: 20,
     paddingHorizontal: 16,
-    height: 56,
+    height: 60,
   },
   inputIcon: {
     marginLeft: 12,
+    color: '#38BDF8',
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#1F2937',
+    color: '#F8FAFC',
     textAlign: 'right',
+    fontWeight: '500',
   },
   button: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 16,
-    height: 56,
+    backgroundColor: '#38BDF8',
+    borderRadius: 18,
+    height: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#4F46E5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    marginTop: 10,
+    shadowColor: '#38BDF8',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
   },
   buttonText: {
     color: '#FFFFFF',
@@ -210,11 +216,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleText: {
-    color: '#6B7280',
+    color: '#94A3B8',
     fontSize: 15,
   },
   toggleTextBold: {
-    color: '#4F46E5',
+    color: '#38BDF8',
     fontWeight: 'bold',
   }
 });

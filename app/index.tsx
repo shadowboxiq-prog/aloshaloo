@@ -125,10 +125,10 @@ export default function HomeScreen() {
       </TouchableOpacity>
       <View style={styles.headerActions}>
         <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/add-friend')}>
-          <Ionicons name="person-add" size={22} color="#4F46E5" />
+          <Ionicons name="search" size={22} color="#38BDF8" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionButton} onPress={signOut}>
-          <Ionicons name="log-out-outline" size={24} color="#EF4444" />
+          <Ionicons name="log-out" size={24} color="#F87171" />
         </TouchableOpacity>
       </View>
     </View>
@@ -256,30 +256,32 @@ const getAvatarColor = (index: number) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#0F172A', // Deep dark background
   },
   header: {
     flexDirection: 'row-reverse',
-    padding: 16,
-    paddingTop: 48,
-    backgroundColor: '#FFFFFF',
+    padding: 20,
+    paddingTop: 60,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)', // Glassmorphism-ish
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: '#334155',
   },
   userInfoHeader: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
   },
   myAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#4F46E5',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#6366F1', // Indigo accent
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 12,
+    borderWidth: 2,
+    borderColor: '#38BDF8', // Azure glow
   },
   myAvatarImage: {
     width: 44,
@@ -298,14 +300,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   myName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111827',
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#F8FAFC',
   },
   myStatus: {
     fontSize: 12,
-    color: '#10B981',
-    fontWeight: '600',
+    color: '#38BDF8',
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
   headerActions: {
     flexDirection: 'row-reverse',
@@ -313,17 +316,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   actionButton: {
-    padding: 8,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
   },
   tabsContainer: {
     flexDirection: 'row-reverse',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: '#334155',
   },
   tab: {
     flex: 1,
@@ -337,11 +342,11 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
+    fontWeight: 'bold',
+    color: '#94A3B8',
   },
   activeTabText: {
-    color: '#4F46E5',
+    color: '#38BDF8',
   },
   badgeDot: {
     position: 'absolute',
@@ -357,32 +362,36 @@ const styles = StyleSheet.create({
   },
   listItem: {
     flexDirection: 'row-reverse',
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 12,
+    backgroundColor: '#1E293B',
+    padding: 20,
+    borderRadius: 24,
+    marginBottom: 16,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   avatarImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     marginLeft: 16,
     borderWidth: 2,
-    borderColor: '#E5E7EB',
+    borderColor: '#38BDF8',
   },
   listInfo: {
     flex: 1,
@@ -400,20 +409,20 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
   usernameText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#F8FAFC',
   },
   subtitleText: {
-    fontSize: 13,
-    color: '#6B7280',
+    fontSize: 14,
+    color: '#94A3B8',
     textAlign: 'right',
     flex: 1,
     marginRight: 8,
   },
   unreadSubtitle: {
-    color: '#111827',
-    fontWeight: '600',
+    color: '#38BDF8',
+    fontWeight: '700',
   },
   statusText: {
     fontSize: 13,
