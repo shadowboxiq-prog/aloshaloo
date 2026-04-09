@@ -3,6 +3,9 @@ import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Keyboard
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'react-native';
+
+const QUICK_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍', '🔥', '✨', '🙏', '😊'];
 
 export default function ChatScreen() {
   const { id, username } = useLocalSearchParams();
@@ -11,7 +14,14 @@ export default function ChatScreen() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [friendStatus, setFriendStatus] = useState<string>('جاري التحقق...');
+  const [friendAvatar, setFriendAvatar] = useState<string | null>(null);
+  const [myAvatar, setMyAvatar] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [otherIsTyping, setOtherIsTyping] = useState(false);
+  const [showEmojis, setShowEmojis] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const channelRef = useRef<any>(null);
 
   useEffect(() => {
     let channel: any = null;
@@ -24,17 +34,25 @@ export default function ChatScreen() {
       setCurrentUserId(uid);
 
       fetchMessages(uid, id as string);
+      fetchProfiles(uid, id as string);
       
-      // Cleanup any existing channel with similar name just in case
-      const channelName = `chat_${uid}_${id}`;
-      supabase.getChannels().forEach(c => {
-         if (c.topic === `realtime:${channelName}`) {
-             supabase.removeChannel(c);
-         }
-      });
+      const channelName = `room_${[uid, id].sort().join('_')}`;
+      
+      // Cleanup previous channel if exists
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
 
-      channel = supabase
-        .channel(channelName)
+      channelRef.current = supabase
+        .channel(channelName, {
+          config: {
+            presence: {
+              key: uid,
+            },
+          },
+        });
+
+      channelRef.current
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -50,14 +68,29 @@ export default function ChatScreen() {
                  return [...prev, newMsg];
               });
 
-              // If message is from the other person, mark it as read
               if (newMsg.sender_id === id) {
                  markMessagesAsRead(uid, id as string);
               }
             }
           }
         )
-        .subscribe();
+        .on('presence', { event: 'sync' }, () => {
+          const state = channelRef.current.presenceState();
+          // console.log('Presence state synced:', state);
+          const typing = Object.values(state).some((presence: any) => 
+            presence.some((p: any) => p.user_id === id && p.is_typing)
+          );
+          setOtherIsTyping(typing);
+        })
+        .subscribe(async (status) => {
+          console.log(`Channel status for ${channelName}:`, status);
+          if (status === 'SUBSCRIBED') {
+            await channelRef.current.track({
+              user_id: uid,
+              is_typing: false,
+            });
+          }
+        });
     }
 
     initChat();
@@ -68,8 +101,8 @@ export default function ChatScreen() {
     
     return () => {
       clearInterval(interval);
-      if (channel) {
-        supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
       }
     };
   }, []);
@@ -116,6 +149,32 @@ export default function ChatScreen() {
     }
   };
 
+  const fetchProfiles = async (uid: string, friendId: string) => {
+    // Fetch friend profile
+    const { data: friendData } = await supabase.from('profiles').select('avatar_url').eq('id', friendId).single();
+    if (friendData) setFriendAvatar(friendData.avatar_url);
+
+    // Fetch my profile
+    const { data: myData } = await supabase.from('profiles').select('avatar_url').eq('id', uid).single();
+    if (myData) setMyAvatar(myData.avatar_url);
+  };
+
+  const handleTyping = () => {
+    if (!isTyping && channelRef.current) {
+      setIsTyping(true);
+      channelRef.current.track({ user_id: currentUserId, is_typing: true });
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      if (channelRef.current) {
+        channelRef.current.track({ user_id: currentUserId, is_typing: false });
+      }
+    }, 2000);
+  };
+
   const sendMessage = async () => {
     if (!newMessage.trim() || !currentUserId || isSending) return;
 
@@ -139,7 +198,16 @@ export default function ChatScreen() {
       Alert.alert('خطأ', 'لم يتم إرسال الرسالة: ' + error.message);
     } else {
       setNewMessage('');
+      // Stop typing immediately on send
+      setIsTyping(false);
+      if (channelRef.current) {
+        channelRef.current.track({ user_id: currentUserId, is_typing: false });
+      }
     }
+  };
+
+  const addEmoji = (emoji: string) => {
+    setNewMessage(prev => prev + emoji);
   };
 
   const formatTime = (dateString: string) => {
@@ -150,8 +218,8 @@ export default function ChatScreen() {
   const renderHeaderTitle = () => (
     <View style={styles.headerTitleContainer}>
       <Text style={styles.headerUsername}>{username || 'المراسلة'}</Text>
-      <Text style={[styles.headerStatus, friendStatus.includes('متصل') && { color: '#10B981' }]}>
-        {friendStatus}
+      <Text style={[styles.headerStatus, (friendStatus.includes('متصل') || otherIsTyping) && { color: '#10B981' }]}>
+        {otherIsTyping ? 'جاري الكتابة...' : friendStatus}
       </Text>
     </View>
   );
@@ -178,6 +246,15 @@ export default function ChatScreen() {
           const isMe = item.sender_id === currentUserId;
           return (
             <View style={[styles.messageWrapper, isMe ? styles.myMessageWrapper : styles.theirMessageWrapper]}>
+              {!isMe && (
+                friendAvatar ? (
+                  <Image source={{ uri: friendAvatar }} style={styles.miniAvatar} />
+                ) : (
+                  <View style={[styles.miniAvatar, styles.miniAvatarPlaceholder]}>
+                    <Text style={styles.miniAvatarText}>{username?.[0]?.toUpperCase()}</Text>
+                  </View>
+                )
+              )}
               <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.theirMessage]}>
                 <Text style={isMe ? styles.myMessageText : styles.theirMessageText}>{item.content}</Text>
                 <View style={[styles.messageMeta, isMe ? { justifyContent: 'flex-start' } : { justifyContent: 'flex-end' }]}>
@@ -192,6 +269,15 @@ export default function ChatScreen() {
                   )}
                 </View>
               </View>
+              {isMe && (
+                myAvatar ? (
+                  <Image source={{ uri: myAvatar }} style={[styles.miniAvatar, { marginLeft: 0, marginRight: 8 }]} />
+                ) : (
+                  <View style={[styles.miniAvatar, styles.miniAvatarPlaceholder, { marginLeft: 0, marginRight: 8, backgroundColor: '#4F46E5', borderWidth: 0 }]}>
+                    <Text style={styles.miniAvatarText}>أنا</Text>
+                  </View>
+                )
+              )}
             </View>
           );
         }}
@@ -199,14 +285,24 @@ export default function ChatScreen() {
       />
 
       <View style={styles.inputContainer}>
+        <TouchableOpacity 
+          style={styles.emojiIconButton} 
+          onPress={() => setShowEmojis(!showEmojis)}
+        >
+          <Ionicons name={showEmojis ? "close-circle" : "happy-outline"} size={26} color="#4F46E5" />
+        </TouchableOpacity>
         <TextInput
           style={styles.textInput}
           value={newMessage}
-          onChangeText={setNewMessage}
+          onChangeText={(text) => {
+            setNewMessage(text);
+            handleTyping();
+          }}
           placeholder="اكتب رسالتك..."
           placeholderTextColor="#9CA3AF"
           multiline
           editable={!isSending}
+          onFocus={() => setShowEmojis(false)}
         />
         <TouchableOpacity 
           style={[styles.sendButton, (!newMessage.trim() || isSending) && styles.sendButtonDisabled]} 
@@ -216,6 +312,23 @@ export default function ChatScreen() {
           <Ionicons name="send" size={20} color="#FFFFFF" style={styles.sendIcon} />
         </TouchableOpacity>
       </View>
+
+      {showEmojis && (
+        <View style={styles.emojiPicker}>
+          <FlatList
+            data={QUICK_EMOJIS}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.emojiItem} onPress={() => addEmoji(item)}>
+                <Text style={styles.emojiText}>{item}</Text>
+              </TouchableOpacity>
+            )}
+            contentContainerStyle={styles.emojiList}
+          />
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -344,5 +457,44 @@ const styles = StyleSheet.create({
   },
   sendIcon: {
     marginLeft: -2,
+  },
+  miniAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginLeft: 8,
+    alignSelf: 'flex-end',
+    marginBottom: 4,
+  },
+  miniAvatarPlaceholder: {
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  miniAvatarText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  emojiIconButton: {
+    padding: 8,
+  },
+  emojiPicker: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingVertical: 8,
+  },
+  emojiList: {
+    paddingHorizontal: 12,
+  },
+  emojiItem: {
+    padding: 8,
+    marginHorizontal: 4,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+  },
+  emojiText: {
+    fontSize: 24,
   }
 });

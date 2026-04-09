@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+import { useFonts } from 'expo-font';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
@@ -10,9 +16,37 @@ export default function RootLayout() {
   const segments = useSegments();
   const router = useRouter();
 
+  const [loaded, error] = useFonts({
+    ...Ionicons.font,
+    ...MaterialIcons.font,
+  });
+
   useEffect(() => {
+    if (error) throw error;
+  }, [error]);
+
+  useEffect(() => {
+    if (loaded && initialized) {
+      SplashScreen.hideAsync();
+    }
+  }, [loaded, initialized]);
+
+  useEffect(() => {
+    // Safety timeout: If auth takes more than 3 seconds, proceed anyway to show the app
+    const timeout = setTimeout(() => {
+      if (!initialized) {
+        console.warn('Auth initialization timed out, proceeding anyway.');
+        setInitialized(true);
+      }
+    }, 3000);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(timeout);
       setSession(session);
+      setInitialized(true);
+    }).catch(err => {
+      console.error('Auth check error:', err);
+      clearTimeout(timeout);
       setInitialized(true);
     });
 
@@ -21,6 +55,7 @@ export default function RootLayout() {
     });
 
     return () => {
+      clearTimeout(timeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -57,10 +92,11 @@ export default function RootLayout() {
     }
   }, [session, initialized, segments]);
 
-  if (!initialized) {
+  if (!initialized || !loaded) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
         <ActivityIndicator size="large" color="#4F46E5" />
+        <Text style={{ marginTop: 10, color: '#4F46E5', fontWeight: 'bold' }}>جاري تشغيل التطبيق...</Text>
       </View>
     );
   }

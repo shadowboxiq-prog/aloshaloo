@@ -23,8 +23,9 @@
     },
     "web": {
       "output": "static",
+      "bundler": "metro",
       "favicon": "./assets/images/favicon.png",
-      "baseUrl": "/aloshaloo"
+      "baseUrl": "/aloshaloo/"
     },
     "plugins": [
       "expo-router",
@@ -43,7 +44,8 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": true,
+      "baseUrl": "/aloshaloo/"
     }
   }
 }
