@@ -59,7 +59,7 @@ export default function Auth() {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.headerContainer}>
-          <Ionicons name="chatbubbles" size={90} color="#38BDF8" />
+          <Ionicons name="chatbubbles" size={90} color="#004be2" />
           <Text style={styles.title}>{isLogin ? 'تسجيل الدخول' : 'حساب جديد'}</Text>
           <Text style={styles.subtitle}>
             {isLogin ? 'مرحباً بعودتك! الرجاء إدخال بياناتك' : 'انضم إلينا الآن وتواصل مع أصدقائك'}
@@ -69,40 +69,40 @@ export default function Auth() {
         <View style={styles.formContainer}>
           {!isLogin && (
             <View style={styles.inputContainer}>
-              <Ionicons name="person-outline" size={20} color="#6B7280" style={styles.inputIcon} />
+              <Ionicons name="person-outline" size={20} color="#575881" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 onChangeText={setUsername}
                 value={username}
                 placeholder="اسم المستخدم"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor="#a9a9d7"
                 autoCapitalize="none"
               />
             </View>
           )}
 
           <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color="#6B7280" style={styles.inputIcon} />
+            <Ionicons name="mail-outline" size={20} color="#575881" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               onChangeText={setEmail}
               value={email}
               placeholder="البريد الإلكتروني"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor="#a9a9d7"
               autoCapitalize="none"
               keyboardType="email-address"
             />
           </View>
           
           <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#6B7280" style={styles.inputIcon} />
+            <Ionicons name="lock-closed-outline" size={20} color="#575881" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               onChangeText={setPassword}
               value={password}
               secureTextEntry
               placeholder="كلمة المرور"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor="#a9a9d7"
               autoCapitalize="none"
             />
           </View>
@@ -134,7 +134,7 @@ export default function Auth() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#f8f5ff',
   },
   scrollContainer: {
     flexGrow: 1,
@@ -148,66 +148,63 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 34,
     fontWeight: '900',
-    color: '#F8FAFC',
+    color: '#2a2b51',
     marginTop: 16,
     marginBottom: 8,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 16,
-    color: '#94A3B8',
+    color: '#575881',
     textAlign: 'center',
     lineHeight: 24,
   },
   formContainer: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#ffffff',
     padding: 28,
     borderRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.4,
-    shadowRadius: 30,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: '#334155',
+    borderWidth: 0,
+    // Add subtle ambient shadow
+    shadowColor: '#2a2b51',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 40,
+    elevation: 4,
   },
   inputContainer: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 18,
+    backgroundColor: '#f2efff', // surface_container_low
+    borderRadius: 100, // full roundedness
     marginBottom: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     height: 60,
   },
   inputIcon: {
     marginLeft: 12,
-    color: '#38BDF8',
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#F8FAFC',
+    color: '#2a2b51',
     textAlign: 'right',
     fontWeight: '500',
   },
   button: {
-    backgroundColor: '#38BDF8',
-    borderRadius: 18,
+    backgroundColor: '#004be2',
+    borderRadius: 100,
     height: 60,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 10,
-    shadowColor: '#38BDF8',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 8,
+    shadowColor: '#004be2',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 4,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: '#ffffff',
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -216,11 +213,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleText: {
-    color: '#94A3B8',
+    color: '#575881',
     fontSize: 15,
   },
   toggleTextBold: {
-    color: '#38BDF8',
+    color: '#004be2',
     fontWeight: 'bold',
   }
 });

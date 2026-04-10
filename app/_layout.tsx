@@ -94,9 +94,9 @@ export default function RootLayout() {
 
   if (!initialized || !loaded) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
-        <ActivityIndicator size="large" color="#4F46E5" />
-        <Text style={{ marginTop: 10, color: '#4F46E5', fontWeight: 'bold' }}>جاري تشغيل التطبيق...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f5ff' }}>
+        <ActivityIndicator size="large" color="#004be2" />
+        <Text style={{ marginTop: 10, color: '#004be2', fontWeight: 'bold' }}>جاري تشغيل التطبيق...</Text>
       </View>
     );
   }
@@ -106,22 +106,22 @@ export default function RootLayout() {
       <Stack.Screen 
         name="index" 
         options={{ 
-          title: 'الرئيسية',
-          headerTitleStyle: { fontWeight: 'bold' },
-          headerTintColor: '#111827',
+          title: 'المراسلة', // Adjusted title
+          headerTitleStyle: { fontWeight: '800', fontSize: 28, color: '#2a2b51' },
+          headerTintColor: '#004be2',
           headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#FFFFFF' }
+          headerStyle: { backgroundColor: '#f8f5ff' }
         }} 
       />
       <Stack.Screen name="auth" options={{ title: 'تسجيل الدخول', headerShown: false }} />
       <Stack.Screen 
         name="chat/[id]" 
         options={{ 
-          title: 'المراسلة',
-          headerTitleStyle: { fontWeight: 'bold' },
-          headerTintColor: '#111827',
+          title: 'المحادثة',
+          headerTitleStyle: { fontWeight: 'bold', fontSize: 18, color: '#2a2b51' },
+          headerTintColor: '#004be2',
           headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#FFFFFF' },
+          headerStyle: { backgroundColor: '#f8f5ff' },
           headerBackTitleVisible: false
         }} 
       />
@@ -129,21 +129,21 @@ export default function RootLayout() {
         name="profile" 
         options={{ 
           title: 'الملف الشخصي',
-          headerTitleStyle: { fontWeight: 'bold' },
-          headerTintColor: '#111827',
+          headerTitleStyle: { fontWeight: 'bold', fontSize: 24, color: '#2a2b51' },
+          headerTintColor: '#004be2',
           headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#FFFFFF' },
+          headerStyle: { backgroundColor: '#f8f5ff' },
           headerBackTitleVisible: false
         }} 
       />
       <Stack.Screen 
         name="add-friend" 
         options={{ 
-          title: 'إضافة صديق',
-          headerTitleStyle: { fontWeight: 'bold' },
-          headerTintColor: '#111827',
+          title: 'البحث عن أصدقاء',
+          headerTitleStyle: { fontWeight: 'bold', fontSize: 24, color: '#2a2b51' },
+          headerTintColor: '#004be2',
           headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#FFFFFF' },
+          headerStyle: { backgroundColor: '#f8f5ff' },
           headerBackTitleVisible: false
         }} 
       />

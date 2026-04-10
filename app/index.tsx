@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Image, ScrollView, Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback } from 'react';
 
 type TabType = 'chats' | 'friends';
 
@@ -30,7 +29,7 @@ export default function HomeScreen() {
     
     if (profile) setCurrentUser(profile);
 
-    // Fetch Friends (bidirectionally)
+    // Fetch Friends
     const { data: friendsData } = await supabase
       .from('friends')
       .select(`
@@ -44,15 +43,14 @@ export default function HomeScreen() {
       return f.user_id === currentUserId ? f.friend : f.user;
     }) || [];
 
-    // Remove duplicates in case of two-way inserts
     formattedFriends = Array.from(new Map(formattedFriends.map(item => [item.id, item])).values());
     setFriends(formattedFriends);
 
-    // Fetch Chats (Messages to group by user)
+    // Fetch Chats
     const { data: messagesData } = await supabase
       .from('messages')
       .select(`
-        id, content, created_at, is_read, sender_id, receiver_id,
+        id, content, created_at, is_read, sender_id, receiver_id, message_type,
         sender:profiles!messages_sender_id_fkey(id, username, last_seen, avatar_url),
         receiver:profiles!messages_receiver_id_fkey(id, username, last_seen, avatar_url)
       `)
@@ -69,7 +67,7 @@ export default function HomeScreen() {
         if (!chatsMap.has(otherUserId)) {
           chatsMap.set(otherUserId, {
             user: otherUser,
-            lastMessage: msg.content,
+            lastMessage: msg.message_type === 'audio' ? 'رسالة صوتية 🎵' : msg.content,
             lastMessageTime: msg.created_at,
             unreadCount: (!isMeSender && !msg.is_read) ? 1 : 0
           });
@@ -92,8 +90,18 @@ export default function HomeScreen() {
     }, [])
   );
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 3600 * 24));
+    
+    if (diffDays === 0) {
+      return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+    } else if (diffDays === 1) {
+      return 'أمس';
+    } else {
+      return date.toLocaleDateString('ar-EG', { weekday: 'short' });
+    }
   };
 
   const getStatusText = (lastSeen: string) => {
@@ -103,363 +111,452 @@ export default function HomeScreen() {
     const diffMin = (now - numLastSeen) / 1000 / 60;
     
     if (diffMin < 2) return 'متصل 🟢';
-    
-    const date = new Date(lastSeen);
-    return `آخر ظهور ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+    return 'غير متصل';
   };
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <TouchableOpacity style={styles.userInfoHeader} onPress={() => router.push('/profile')}>
-        {currentUser?.avatar_url ? (
-          <Image source={{ uri: currentUser.avatar_url }} style={styles.myAvatarImage} />
-        ) : (
-          <View style={styles.myAvatar}>
-            <Text style={styles.avatarText}>{currentUser?.username?.[0]?.toUpperCase() || 'U'}</Text>
-          </View>
-        )}
-        <View style={styles.myInfo}>
-          <Text style={styles.myName}>{currentUser?.username || 'مستخدم'}</Text>
-          <Text style={styles.myStatus}>متصل الآن</Text>
-        </View>
-      </TouchableOpacity>
-      <View style={styles.headerActions}>
-        <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/add-friend')}>
-          <Ionicons name="search" size={22} color="#38BDF8" />
+  const renderTopAppBar = () => (
+    <View style={styles.topAppBar}>
+      <View style={styles.headerTitleRow}>
+        <TouchableOpacity style={styles.headerAvatarContainer} onPress={() => router.push('/profile')}>
+          {currentUser?.avatar_url ? (
+            <Image source={{ uri: currentUser.avatar_url }} style={styles.headerAvatar} />
+          ) : (
+            <View style={styles.headerAvatarPlaceholder}>
+              <Text style={styles.headerAvatarText}>{currentUser?.username?.[0]?.toUpperCase() || 'U'}</Text>
+            </View>
+          )}
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={signOut}>
-          <Ionicons name="log-out" size={24} color="#F87171" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>المراسلات</Text>
       </View>
+      <TouchableOpacity style={styles.searchIconBtn} onPress={() => router.push('/add-friend')}>
+        <Ionicons name="search" size={28} color="#575881" />
+      </TouchableOpacity>
     </View>
   );
 
-  const renderTabs = () => (
-    <View style={styles.tabsContainer}>
-      <TouchableOpacity 
-        style={[styles.tab, activeTab === 'friends' && styles.activeTab]}
-        onPress={() => setActiveTab('friends')}
+  const renderActiveUsers = () => (
+    <View style={styles.activeUsersSection}>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false} 
+        contentContainerStyle={styles.activeUsersScroll}
+        inverted={Platform.OS === 'web' ? false : true} // Adjust for RTL natively
+        style={{ flexDirection: 'row-reverse' }}
       >
-        <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>الأصدقاء</Text>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        style={[styles.tab, activeTab === 'chats' && styles.activeTab]}
-        onPress={() => setActiveTab('chats')}
-      >
-        <Text style={[styles.tabText, activeTab === 'chats' && styles.activeTabText]}>المراسلات</Text>
-        {chats.some(c => c.unreadCount > 0) && (
-          <View style={styles.badgeDot} />
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.activeUserContainer} onPress={() => router.push('/add-friend')}>
+          <View style={styles.myActiveUserImageWrapper}>
+            <View style={styles.myActiveUserImageInner}>
+              <Ionicons name="add" size={36} color="#004be2" />
+            </View>
+          </View>
+          <Text style={styles.activeUserName}>إضافة</Text>
+        </TouchableOpacity>
+
+        {friends.map((friend, index) => {
+          const isOnline = getStatusText(friend.last_seen).includes('متصل');
+          return (
+            <TouchableOpacity 
+              key={friend.id} 
+              style={styles.activeUserContainer} 
+              onPress={() => router.push({ pathname: '/chat/[id]', params: { id: friend.id, username: friend.username } })}
+            >
+              <View style={styles.activeUserImageWrapper}>
+                {friend.avatar_url ? (
+                  <Image source={{ uri: friend.avatar_url }} style={styles.activeUserImage} />
+                ) : (
+                  <View style={[styles.activeUserImage, { backgroundColor: getAvatarColor(index), justifyContent: 'center', alignItems: 'center' }]}>
+                    <Text style={{ color: '#ffffff', fontSize: 24, fontWeight: 'bold' }}>{friend.username[0].toUpperCase()}</Text>
+                  </View>
+                )}
+                <View style={styles.imageOverlay} />
+                {isOnline && <View style={styles.onlineDot} />}
+              </View>
+              <Text style={styles.activeUserName} numberOfLines={1}>{friend.username}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 
   const renderChatItem = ({ item, index }: { item: any; index: number }) => (
     <TouchableOpacity 
-      style={styles.listItem}
+      style={styles.chatItem}
       onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.user.id, username: item.user.username } })}
     >
-      {item.user.avatar_url ? (
-        <Image source={{ uri: item.user.avatar_url }} style={styles.avatarImage} />
-      ) : (
-        <View style={[styles.avatar, { backgroundColor: getAvatarColor(index) }]}>
-          <Text style={styles.avatarText}>{item.user.username[0].toUpperCase()}</Text>
-        </View>
-      )}
-      <View style={styles.listInfo}>
-        <View style={styles.chatRow}>
-          <Text style={styles.timeText}>
-            {new Date(item.lastMessageTime).getHours()}:{new Date(item.lastMessageTime).getMinutes().toString().padStart(2, '0')}
-          </Text>
-          <Text style={styles.usernameText}>{item.user.username}</Text>
-        </View>
-        <View style={styles.chatRow}>
-          {item.unreadCount > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>{item.unreadCount}</Text>
-            </View>
-          )}
-          <Text style={[styles.subtitleText, item.unreadCount > 0 && styles.unreadSubtitle]} numberOfLines={1}>
-            {item.lastMessage}
-          </Text>
-        </View>
+      <View style={styles.chatAvatarWrapper}>
+        {item.user.avatar_url ? (
+          <Image source={{ uri: item.user.avatar_url }} style={styles.chatAvatar} />
+        ) : (
+          <View style={[styles.chatAvatar, { backgroundColor: getAvatarColor(index), justifyContent:'center', alignItems: 'center' }]}>
+            <Text style={{ color: '#ffffff', fontSize: 24, fontWeight: 'bold' }}>{item.user.username[0].toUpperCase()}</Text>
+          </View>
+        )}
       </View>
+
+      <View style={styles.chatItemInfo}>
+        <View style={styles.chatItemHeader}>
+          <Text style={styles.chatItemName} numberOfLines={1}>{item.user.username}</Text>
+          <Text style={[styles.chatItemTime, item.unreadCount > 0 && { color: '#004be2' }]}>
+            {formatTime(item.lastMessageTime)}
+          </Text>
+        </View>
+        <Text style={[styles.chatItemLastMessage, item.unreadCount > 0 ? styles.chatItemUnreadMessage : null]} numberOfLines={1}>
+          {item.lastMessage}
+        </Text>
+      </View>
+
+      {item.unreadCount > 0 && (
+         <View style={styles.unreadDot} />
+      )}
     </TouchableOpacity>
   );
 
   const renderFriendItem = ({ item, index }: { item: any, index: number }) => (
     <TouchableOpacity 
-      style={styles.listItem}
+      style={styles.chatItem}
       onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id, username: item.username } })}
     >
-      {item.avatar_url ? (
-        <Image source={{ uri: item.avatar_url }} style={styles.avatarImage} />
-      ) : (
-        <View style={[styles.avatar, { backgroundColor: getAvatarColor(index) }]}>
-          <Text style={styles.avatarText}>{item.username[0].toUpperCase()}</Text>
-        </View>
-      )}
-      <View style={styles.listInfo}>
-        <Text style={styles.usernameText}>{item.username}</Text>
-        <Text style={styles.statusText}>{getStatusText(item.last_seen)}</Text>
+      <View style={styles.chatAvatarWrapper}>
+        {item.avatar_url ? (
+          <Image source={{ uri: item.avatar_url }} style={styles.chatAvatar} />
+        ) : (
+          <View style={[styles.chatAvatar, { backgroundColor: getAvatarColor(index), justifyContent:'center', alignItems: 'center' }]}>
+            <Text style={{ color: '#ffffff', fontSize: 24, fontWeight: 'bold' }}>{item.username[0].toUpperCase()}</Text>
+          </View>
+        )}
       </View>
-      <Ionicons name="chatbubble-ellipses-outline" size={24} color="#D1D5DB" />
+
+      <View style={styles.chatItemInfo}>
+        <View style={styles.chatItemHeader}>
+          <Text style={styles.chatItemName} numberOfLines={1}>{item.username}</Text>
+        </View>
+        <Text style={styles.chatItemLastMessage} numberOfLines={1}>
+          {getStatusText(item.last_seen)}
+        </Text>
+      </View>
+      <Ionicons name="chatbubble-outline" size={24} color="#a9a9d7" />
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.container}>
-      {renderHeader()}
-      {renderTabs()}
+      {renderTopAppBar()}
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#4F46E5" style={{ marginTop: 40 }} />
-      ) : activeTab === 'chats' ? (
-        <FlatList
-          data={chats}
-          keyExtractor={(item) => item.user.id}
-          contentContainerStyle={styles.listContainer}
-          renderItem={renderChatItem}
-          ListEmptyComponent={() => (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={60} color="#D1D5DB" />
-              <Text style={styles.emptyText}>لا توجد مراسلات حتى الآن</Text>
-            </View>
-          )}
-        />
-      ) : (
-        <FlatList
-          data={friends}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-          renderItem={renderFriendItem}
-          ListEmptyComponent={() => (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="people-outline" size={60} color="#D1D5DB" />
-              <Text style={styles.emptyText}>قائمة الأصدقاء فارغة</Text>
-              <TouchableOpacity style={styles.addFriendBtn} onPress={() => router.push('/add-friend')}>
-                <Text style={styles.addFriendText}>البحث عن أصدقاء</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        />
-      )}
+      <FlatList
+        data={activeTab === 'chats' ? chats : friends}
+        keyExtractor={(item) => (activeTab === 'chats' ? item.user.id : item.id)}
+        contentContainerStyle={styles.mainContent}
+        ListHeaderComponent={activeTab === 'chats' ? renderActiveUsers : null}
+        renderItem={activeTab === 'chats' ? renderChatItem : renderFriendItem}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={() => (
+          <View style={styles.emptyContainer}>
+            {loading ? (
+              <ActivityIndicator size="large" color="#004be2" />
+            ) : (
+              <Text style={styles.emptyText}>لم يتم العثور على أية رسائل</Text>
+            )}
+          </View>
+        )}
+      />
+
+      {/* Floating Action Button */}
+      <TouchableOpacity style={styles.fab} onPress={() => router.push('/add-friend')}>
+        <Ionicons name="create" size={28} color="#ffffff" />
+      </TouchableOpacity>
+
+      {/* Bottom Navigation Navbar */}
+      <View style={styles.bottomNavContainer}>
+        <View style={styles.bottomNav}>
+          <TouchableOpacity 
+            style={[styles.navItem, activeTab === 'chats' && styles.navItemActive]}
+            onPress={() => setActiveTab('chats')}
+          >
+            <Ionicons name={activeTab === 'chats' ? "chatbubble" : "chatbubble-outline"} size={26} color={activeTab === 'chats' ? "#ffffff" : "#575881"} />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.navItem, activeTab === 'friends' && styles.navItemActive]}
+            onPress={() => setActiveTab('friends')}
+          >
+            <Ionicons name={activeTab === 'friends' ? "people" : "people-outline"} size={28} color={activeTab === 'friends' ? "#ffffff" : "#575881"} />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.navItem}
+            onPress={() => router.push('/profile')}
+          >
+            <Ionicons name="person-outline" size={26} color="#575881" />
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }
 
 const getAvatarColor = (index: number) => {
-  const colors = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+  const colors = ['#004be2', '#006575', '#903986', '#0041c7', '#575881', '#2a2b51'];
   return colors[index % colors.length];
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A', // Deep dark background
+    backgroundColor: '#f8f5ff',
   },
-  header: {
+  topAppBar: {
     flexDirection: 'row-reverse',
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: 'rgba(30, 41, 59, 0.8)', // Glassmorphism-ish
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(248, 245, 255, 0.95)',
+    zIndex: 10,
   },
-  userInfoHeader: {
+  headerTitleRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
+    gap: 16,
   },
-  myAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#6366F1', // Indigo accent
+  headerAvatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 20, // squircle shape
+    overflow: 'hidden',
+    backgroundColor: '#e8e6ff',
+    marginLeft: 16,
+  },
+  headerAvatar: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  headerAvatarPlaceholder: {
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 12,
-    borderWidth: 2,
-    borderColor: '#38BDF8', // Azure glow
   },
-  myAvatarImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginLeft: 12,
-    borderWidth: 2,
-    borderColor: '#4F46E5',
-  },
-  avatarText: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  myInfo: {
-    alignItems: 'flex-end',
-  },
-  myName: {
+  headerAvatarText: {
+    color: '#004be2',
     fontSize: 20,
-    fontWeight: '800',
-    color: '#F8FAFC',
-  },
-  myStatus: {
-    fontSize: 12,
-    color: '#38BDF8',
     fontWeight: 'bold',
-    letterSpacing: 0.5,
   },
-  headerActions: {
+  headerTitle: {
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontSize: 36, // Huge size like HTML 2.75rem ~ 44px, using 36 for RN standard fit
+    fontWeight: '700',
+    letterSpacing: -1,
+    color: '#2a2b51',
+  },
+  searchIconBtn: {
+    padding: 8,
+    borderRadius: 16,
+    backgroundColor: 'transparent',
+  },
+  
+  // Main Content
+  mainContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 160, // Leave space for FAB and BottomNav
+  },
+
+  // Active Users (Stories)
+  activeUsersSection: {
+    marginBottom: 24,
+    marginTop: 8,
+  },
+  activeUsersScroll: {
     flexDirection: 'row-reverse',
+    gap: 16,
+    paddingVertical: 10,
+  },
+  activeUserContainer: {
     alignItems: 'center',
-    gap: 12,
+    marginLeft: 20, // Space from left neighbor in RTL
   },
-  actionButton: {
-    padding: 10,
-    borderRadius: 14,
-    backgroundColor: '#1E293B',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  tabsContainer: {
-    flexDirection: 'row-reverse',
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 8,
+  myActiveUserImageWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 24,
+    padding: 3, // Simulate the gradient border thickness
+    backgroundColor: '#004be2', // Gradient fallback
+    justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  myActiveUserImageInner: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f8f5ff',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activeUserImageWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 24,
+    backgroundColor: '#e1e0ff',
+    marginBottom: 8,
     position: 'relative',
   },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#4F46E5',
-  },
-  tabText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#94A3B8',
-  },
-  activeTabText: {
-    color: '#38BDF8',
-  },
-  badgeDot: {
-    position: 'absolute',
-    top: 6,
-    right: '25%',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#EF4444',
-  },
-  listContainer: {
-    padding: 16,
-  },
-  listItem: {
-    flexDirection: 'row-reverse',
-    backgroundColor: '#1E293B',
-    padding: 20,
+  activeUserImage: {
+    width: '100%',
+    height: '100%',
     borderRadius: 24,
-    marginBottom: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
   },
-  avatar: {
+  imageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#4ade80',
+    borderWidth: 3,
+    borderColor: '#f8f5ff',
+  },
+  activeUserName: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#575881',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+
+  // Chat/Friend List Items
+  chatItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: '#ffffff', // surface-container-lowest
+    padding: 16,
+    borderRadius: 24,
+    marginBottom: 10,
+  },
+  chatAvatarWrapper: {
     width: 60,
     height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#e8e6ff',
+    marginLeft: 16, // In RTL, separates from text
   },
-  avatarImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginLeft: 16,
-    borderWidth: 2,
-    borderColor: '#38BDF8',
+  chatAvatar: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
   },
-  listInfo: {
+  chatItemInfo: {
     flex: 1,
     alignItems: 'flex-end',
   },
-  chatRow: {
+  chatItemHeader: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     width: '100%',
-    alignItems: 'center',
-    marginBottom: 2,
+    alignItems: 'baseline',
+    marginBottom: 4,
   },
-  timeText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-  },
-  usernameText: {
+  chatItemName: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#F8FAFC',
-  },
-  subtitleText: {
-    fontSize: 14,
-    color: '#94A3B8',
-    textAlign: 'right',
-    flex: 1,
-    marginRight: 8,
-  },
-  unreadSubtitle: {
-    color: '#38BDF8',
     fontWeight: '700',
+    color: '#2a2b51',
   },
-  statusText: {
-    fontSize: 13,
-    color: '#10B981',
-  },
-  unreadBadge: {
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    minWidth: 20,
-    alignItems: 'center',
-  },
-  unreadText: {
-    color: '#FFF',
+  chatItemTime: {
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    color: '#575881', // or primary tracking-widest
+    textTransform: 'uppercase',
   },
+  chatItemLastMessage: {
+    fontSize: 14,
+    color: '#575881', // on-surface-variant
+    lineHeight: 22,
+    textAlign: 'right',
+  },
+  chatItemUnreadMessage: {
+    fontWeight: '700',
+    color: '#2a2b51',
+  },
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#004be2',
+    marginRight: 16,
+  },
+
+  // Empty State
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 60,
+    paddingVertical: 40,
   },
   emptyText: {
-    marginTop: 16,
-    color: '#6B7280',
+    color: '#a9a9d7',
     fontSize: 16,
-    marginBottom: 16,
+    fontWeight: '600',
   },
-  addFriendBtn: {
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+
+  // FAB
+  fab: {
+    position: 'absolute',
+    bottom: 120,
+    right: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#004be2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#004be2',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+    zIndex: 40,
   },
-  addFriendText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
+
+  // Bottom Navigation NavBar
+  bottomNavContainer: {
+    position: 'absolute',
+    bottom: 24,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 50,
+  },
+  bottomNav: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    width: '90%',
+    maxWidth: 400,
+    height: 80,
+    backgroundColor: 'rgba(219, 217, 255, 0.85)', // translucent light purple #dbd9ff
+    borderRadius: 40, // pill
+    paddingHorizontal: 8,
+    shadowColor: '#2a2b51',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.08,
+    shadowRadius: 30,
+    elevation: 10,
+  },
+  navItem: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  navItemActive: {
+    backgroundColor: '#004be2',
   }
 });

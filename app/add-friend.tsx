@@ -135,66 +135,61 @@ export default function AddFriendScreen() {
 }
 
 const getAvatarColor = (index: number) => {
-  const colors = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+  const colors = ['#004be2', '#006575', '#903986', '#0041c7', '#575881', '#2a2b51'];
   return colors[index % colors.length];
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#f8f5ff',
   },
   searchContainer: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    backgroundColor: '#f2efff',
+    borderRadius: 100, // pill
     paddingHorizontal: 16,
     margin: 16,
-    height: 50,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
+    height: 56,
+    borderWidth: 0,
   },
   searchIcon: {
-    marginLeft: 8,
+    marginLeft: 12,
   },
   searchInput: {
     flex: 1,
     textAlign: 'right',
     fontSize: 16,
-    color: '#1F2937',
+    color: '#2a2b51',
   },
   listContainer: {
     padding: 16,
   },
   userItem: {
     flexDirection: 'row-reverse',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffffff',
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 24,
     marginBottom: 12,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#2a2b51',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
-    shadowRadius: 5,
+    shadowRadius: 10,
     elevation: 2,
+    borderWidth: 0,
   },
   avatar: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: 16, // squircle
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 16,
   },
   avatarText: {
-    color: '#FFFFFF',
+    color: '#ffffff',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -205,21 +200,26 @@ const styles = StyleSheet.create({
   usernameText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
+    color: '#2a2b51',
   },
   addButton: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 4,
+    backgroundColor: '#004be2',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 100, // pill
+    gap: 6,
+    shadowColor: '#004be2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
   },
   addText: {
-    color: '#FFFFFF',
+    color: '#ffffff',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: 16,
-    color: '#6B7280',
+    color: '#a9a9d7',
     fontSize: 16,
   }
 });
