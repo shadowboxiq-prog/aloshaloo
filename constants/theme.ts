@@ -1,53 +1,70 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
 export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
-  },
+  primary: '#6a1cf6',
+  primaryContainer: '#ac8eff',
+  primaryDim: '#5d00e3',
+  onPrimary: '#f7f0ff',
+  
+  secondary: '#00675d',
+  secondaryContainer: '#4af8e3',
+  onSecondaryContainer: '#005b51',
+  
+  background: '#fdf3ff',
+  surface: '#fdf3ff',
+  surfaceContainer: '#f3e2ff',
+  surfaceContainerHigh: '#efdbff',
+  surfaceContainerHighest: '#ebd4ff',
+  surfaceContainerLow: '#f9edff',
+  surfaceContainerLowest: '#ffffff',
+  
+  onSurface: '#38274c',
+  onSurfaceVariant: '#67537c',
+  
+  error: '#b41340',
+  outline: '#836e99',
+  outlineVariant: '#bba4d2',
+  
+  white: '#ffffff',
+  black: '#38274c', // We don't use pure black
+  glassBg: 'rgba(253, 243, 255, 0.7)',
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+export const Gradients = {
+  primary: ['#6a1cf6', '#ac8eff'],
+  secondary: ['#4af8e3', '#00675d'], 
+  pulse: ['#6a1cf6', '#4af8e3', '#b70047'], // Multi-stop for stories
+};
+
+export const Spacing = {
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  xxl: 48,
+};
+
+export const Radius = {
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 48, // 3rem approx
+  full: 9999,
+};
+
+export const Shadow = {
+  ambient: {
+    shadowColor: '#38274c',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    elevation: 4,
   },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+  premium: {
+    shadowColor: '#6a1cf6',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.15,
+    shadowRadius: 30,
+    elevation: 8,
+  }
+};

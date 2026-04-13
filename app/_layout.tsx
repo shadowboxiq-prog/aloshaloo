@@ -6,6 +6,7 @@ import { View, ActivityIndicator, Text } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Colors } from '../constants/theme';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -32,10 +33,8 @@ export default function RootLayout() {
   }, [loaded, initialized]);
 
   useEffect(() => {
-    // Safety timeout: If auth takes more than 3 seconds, proceed anyway to show the app
     const timeout = setTimeout(() => {
       if (!initialized) {
-        console.warn('Auth initialization timed out, proceeding anyway.');
         setInitialized(true);
       }
     }, 3000);
@@ -45,7 +44,6 @@ export default function RootLayout() {
       setSession(session);
       setInitialized(true);
     }).catch(err => {
-      console.error('Auth check error:', err);
       clearTimeout(timeout);
       setInitialized(true);
     });
@@ -61,92 +59,91 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const channel = supabase.channel('online-users', {
+      config: {
+        presence: {
+          key: session.user.id,
+        },
+      },
+    });
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const ids = Object.keys(state);
+        // Custom event for other components
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('presence-sync', { detail: { ids } }));
+        }
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            id: session.user.id,
+            online_at: new Date().toISOString(),
+          });
+        }
+      });
+
+    // Heartbeat to update last_seen in DB
+    const updateLastSeen = async () => {
+      await supabase
+        .from('profiles')
+        .update({ last_seen: new Date().toISOString() })
+        .eq('id', session.user.id);
+    };
+
+    updateLastSeen(); // initial update
+    const heartbeat = setInterval(updateLastSeen, 1000 * 60 * 2); // every 2 mins
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(heartbeat);
+    };
+  }, [session?.user?.id]);
+
+  useEffect(() => {
     if (!initialized) return;
 
     const inAuthGroup = segments[0] === 'auth';
 
     if (!session && !inAuthGroup) {
-      // Redirect to the login page
       router.replace('/auth');
     } else if (session && inAuthGroup) {
-      // Redirect to home if logged in and trying to access auth screen
       router.replace('/');
     }
 
-    // Heartbeat for last_seen
     let interval: NodeJS.Timeout;
     if (session) {
       const updateLastSeen = async () => {
-        await supabase
-          .from('profiles')
-          .update({ last_seen: new Date().toISOString() })
-          .eq('id', session.user.id);
+        await supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', session.user.id);
       };
-      
-      updateLastSeen(); // Initial update
-      interval = setInterval(updateLastSeen, 60000); // Update every minute
+      updateLastSeen();
+      interval = setInterval(updateLastSeen, 60000);
     }
 
-    return () => {
-      if (interval) clearInterval(interval);
-    }
+    return () => { if (interval) clearInterval(interval); }
   }, [session, initialized, segments]);
 
   if (!initialized || !loaded) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f5ff' }}>
-        <ActivityIndicator size="large" color="#004be2" />
-        <Text style={{ marginTop: 10, color: '#004be2', fontWeight: 'bold' }}>جاري تشغيل التطبيق...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: 15, color: Colors.primary, fontWeight: '900', fontSize: 24 }}>CHAT UP</Text>
       </View>
     );
   }
 
   return (
-    <Stack>
-      <Stack.Screen 
-        name="index" 
-        options={{ 
-          title: 'المراسلة', // Adjusted title
-          headerTitleStyle: { fontWeight: '800', fontSize: 28, color: '#2a2b51' },
-          headerTintColor: '#004be2',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#f8f5ff' }
-        }} 
-      />
-      <Stack.Screen name="auth" options={{ title: 'تسجيل الدخول', headerShown: false }} />
-      <Stack.Screen 
-        name="chat/[id]" 
-        options={{ 
-          title: 'المحادثة',
-          headerTitleStyle: { fontWeight: 'bold', fontSize: 18, color: '#2a2b51' },
-          headerTintColor: '#004be2',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#f8f5ff' },
-          headerBackTitleVisible: false
-        }} 
-      />
-      <Stack.Screen 
-        name="profile" 
-        options={{ 
-          title: 'الملف الشخصي',
-          headerTitleStyle: { fontWeight: 'bold', fontSize: 24, color: '#2a2b51' },
-          headerTintColor: '#004be2',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#f8f5ff' },
-          headerBackTitleVisible: false
-        }} 
-      />
-      <Stack.Screen 
-        name="add-friend" 
-        options={{ 
-          title: 'البحث عن أصدقاء',
-          headerTitleStyle: { fontWeight: 'bold', fontSize: 24, color: '#2a2b51' },
-          headerTintColor: '#004be2',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: '#f8f5ff' },
-          headerBackTitleVisible: false
-        }} 
-      />
+    <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+      <Stack.Screen name="index" options={{ title: 'Home' }} />
+      <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
+      <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
+      <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+      <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
     </Stack>
   );
 }

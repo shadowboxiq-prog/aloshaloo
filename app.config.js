@@ -5,12 +5,12 @@ export default ({ config }) => {
 
   return {
     ...config,
-    name: "chat-app",
-    slug: "chat-app",
+    name: "CHAT UP",
+    slug: "chat-up",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    scheme: "chatapp",
+    scheme: "chatup",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     ios: {
