@@ -203,46 +203,39 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const myName = profile?.username || user?.user_metadata?.username || 'مستخدم';
       const myAvatar = profile?.avatar_url || user?.user_metadata?.avatar_url || null;
 
-      // Create peer connection
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      pcRef.current = pc;
-
-      // Monitor connection state
-      pc.oniceconnectionstatechange = () => console.log('[PC-Caller] iceConnectionState:', pc.iceConnectionState);
-      pc.onconnectionstatechange = () => console.log('[PC-Caller] connectionState:', pc.connectionState);
-
-      pc.ontrack = (ev) => {
-        console.log('[PC-Caller] ontrack fired, streams:', ev.streams.length);
-        if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
-      };
-
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-      // Create offer & wait for all ICE candidates
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      console.log('[Call] Waiting for ICE gathering...');
-      const fullOffer = await waitForIceComplete(pc);
-      const candidateCount = (fullOffer.sdp.match(/a=candidate/g) || []).length;
-      console.log('[Call] ICE done. Candidates:', candidateCount);
-
-      if (candidateCount === 0) {
-        console.warn('[Call] WARNING: No ICE candidates gathered! STUN/TURN may be blocked.');
-      }
-
-      // Insert call row
+      // ① INSERT call row IMMEDIATELY → receiver gets notification instantly
       const { data, error } = await supabase.from('calls').insert([{
         caller_id: user.id,
         receiver_id: targetUid,
         caller_name: myName,
         caller_avatar: myAvatar,
-        offer: fullOffer,
+        offer: null,
         status: 'ringing',
       }]).select().single();
-
       if (error) throw error;
       setActiveCallId(data.id);
-      console.log('[Call] Call row created:', data.id);
+      console.log('[Call] Call row created INSTANTLY:', data.id);
+
+      // ② Create peer connection & gather ICE in parallel
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+      pc.oniceconnectionstatechange = () => console.log('[PC-Caller] iceConnectionState:', pc.iceConnectionState);
+      pc.onconnectionstatechange = () => console.log('[PC-Caller] connectionState:', pc.connectionState);
+      pc.ontrack = (ev) => {
+        console.log('[PC-Caller] ontrack fired');
+        if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
+      };
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      console.log('[Call] Gathering ICE candidates...');
+      const fullOffer = await waitForIceComplete(pc);
+      console.log('[Call] ICE done. Candidates:', (fullOffer.sdp.match(/a=candidate/g) || []).length);
+
+      // ③ UPDATE call row with full offer (ICE candidates embedded)
+      await supabase.from('calls').update({ offer: fullOffer }).eq('id', data.id);
+      console.log('[Call] Offer updated in DB');
 
     } catch (err) {
       console.error('[Call] startCall error:', err);
@@ -260,39 +253,37 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setStatus('connected');
       stopSound();
 
-      // Read the full offer from DB
-      const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
-      if (!call?.offer?.sdp) throw new Error('No valid offer in DB');
-      console.log('[Call] Offer SDP length:', call.offer.sdp.length,
-        'candidates:', (call.offer.sdp.match(/a=candidate/g) || []).length);
+      // Read offer from DB — poll if caller hasn't finished ICE yet
+      let offerData: { type: string; sdp: string } | null = null;
+      for (let i = 0; i < 15; i++) {
+        const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
+        if (call?.offer?.sdp) { offerData = call.offer; break; }
+        console.log('[Call] Offer not ready yet, waiting... attempt', i + 1);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!offerData) throw new Error('Offer not available after waiting');
+      console.log('[Call] Got offer. Candidates:', (offerData.sdp.match(/a=candidate/g) || []).length);
 
       // Create peer connection
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
-
       pc.oniceconnectionstatechange = () => console.log('[PC-Recv] iceConnectionState:', pc.iceConnectionState);
       pc.onconnectionstatechange = () => console.log('[PC-Recv] connectionState:', pc.connectionState);
-
       pc.ontrack = (ev) => {
-        console.log('[PC-Recv] ontrack fired, streams:', ev.streams.length);
+        console.log('[PC-Recv] ontrack fired');
         if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
       };
-
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-      // Set remote description (the full offer with embedded ICE candidates)
-      await pc.setRemoteDescription({ type: call.offer.type, sdp: call.offer.sdp });
+      // Set remote description & create answer
+      await pc.setRemoteDescription({ type: offerData.type, sdp: offerData.sdp });
       console.log('[Call] Receiver: remote description set');
 
-      // Create answer & wait for ICE
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      console.log('[Call] Waiting for ICE gathering...');
       const fullAnswer = await waitForIceComplete(pc);
-      const candidateCount = (fullAnswer.sdp.match(/a=candidate/g) || []).length;
-      console.log('[Call] ICE done. Candidates:', candidateCount);
+      console.log('[Call] Answer ICE done. Candidates:', (fullAnswer.sdp.match(/a=candidate/g) || []).length);
 
-      // Save answer to DB
       await supabase.from('calls').update({ status: 'connected', answer: fullAnswer }).eq('id', activeCallId);
       console.log('[Call] Answer saved to DB');
 
