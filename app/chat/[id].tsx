@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { formatLastSeenArabic } from '../../lib/date-utils';
 import * as DocumentPicker from 'expo-document-picker';
 import { useCall } from '../../context/CallProvider';
+import { TypingIndicator } from '../../components/TypingIndicator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -545,6 +546,7 @@ export default function ChatScreen() {
           data={messages}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContent}
+          ListFooterComponent={() => otherIsTyping ? <TypingIndicator /> : <View style={{ height: 10 }} />}
           renderItem={({ item }) => {
             const isMe = item.sender_id === currentUserId;
             const isMedia = item.message_type === 'image' || item.message_type === 'video' || item.message_type === 'audio';
