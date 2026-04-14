@@ -27,33 +27,66 @@ export const useCall = () => {
   return context;
 };
 
-const ICE_SERVERS = {
+const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
+    // Free TURN servers for NAT traversal
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
 };
 
-/** Wait for ICE gathering to complete, then return the full local description. */
-function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 5000): Promise<RTCSessionDescription | null> {
+/** Wait for ICE gathering to finish, returns plain { type, sdp } object. */
+function waitForIceComplete(pc: RTCPeerConnection, timeoutMs = 8000): Promise<{ type: string; sdp: string }> {
   return new Promise((resolve) => {
-    if (pc.iceGatheringState === 'complete') {
-      resolve(pc.localDescription);
-      return;
-    }
-    const timer = setTimeout(() => {
-      console.log('ICE gathering timed out, using current candidates');
-      resolve(pc.localDescription);
-    }, timeoutMs);
+    const finish = () => {
+      const ld = pc.localDescription;
+      resolve({ type: ld!.type, sdp: ld!.sdp });
+    };
+    if (pc.iceGatheringState === 'complete') { finish(); return; }
+    const timer = setTimeout(() => { console.log('[ICE] Gathering timed out'); finish(); }, timeoutMs);
     pc.addEventListener('icegatheringstatechange', () => {
-      if (pc.iceGatheringState === 'complete') {
-        clearTimeout(timer);
-        resolve(pc.localDescription);
-      }
+      if (pc.iceGatheringState === 'complete') { clearTimeout(timer); finish(); }
     });
   });
+}
+
+/** Play remote audio imperatively (bypasses React re-render issues). */
+function playRemoteAudio(stream: MediaStream): HTMLAudioElement | null {
+  if (Platform.OS !== 'web') return null;
+  try {
+    const audio = document.createElement('audio');
+    audio.id = 'webrtc-remote-audio';
+    audio.autoplay = true;
+    (audio as any).playsInline = true;
+    audio.srcObject = stream;
+    document.body.appendChild(audio);
+    audio.play().catch(e => console.warn('[Audio] play() rejected:', e));
+    console.log('[Audio] Remote audio element created and playing');
+    return audio;
+  } catch (e) { console.error('[Audio] Failed to create audio element:', e); return null; }
+}
+
+function stopRemoteAudio() {
+  if (Platform.OS !== 'web') return;
+  try {
+    const el = document.getElementById('webrtc-remote-audio');
+    if (el) { (el as HTMLAudioElement).srcObject = null; el.remove(); }
+  } catch {}
 }
 
 export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -63,41 +96,27 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const subscriptionRef = useRef<any>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentUidRef = useRef<string | null>(null);
 
+  // ─── Auth & signaling setup ─────────────────────────────────────────
   useEffect(() => {
-    const initSession = async () => {
+    const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setCurrentUserId(session.user.id);
-        setupSignaling(session.user.id);
-      }
+      if (session) { currentUidRef.current = session.user.id; setupSignaling(session.user.id); }
     };
-    initSession();
+    init();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (session) {
-          setCurrentUserId(session.user.id);
-          setupSignaling(session.user.id);
-        } else {
-          setCurrentUserId(null);
-          if (subscriptionRef.current) subscriptionRef.current.unsubscribe();
-        }
-      }
-    );
+    const { data: authListener } = supabase.auth.onAuthStateChange((_ev, session) => {
+      if (session) { currentUidRef.current = session.user.id; setupSignaling(session.user.id); }
+      else { currentUidRef.current = null; subscriptionRef.current?.unsubscribe(); }
+    });
 
-    return () => {
-      if (subscriptionRef.current) subscriptionRef.current.unsubscribe();
-      stopSound();
-      authListener.subscription.unsubscribe();
-    };
+    return () => { subscriptionRef.current?.unsubscribe(); stopSound(); authListener.subscription.unsubscribe(); };
   }, []);
 
   // ─── Sound helpers ──────────────────────────────────────────────────
@@ -107,91 +126,69 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const url = type === 'calling'
         ? 'https://assets.mixkit.co/active_storage/sfx/2592/2592-preview.mp3'
         : 'https://assets.mixkit.co/active_storage/sfx/2591/2591-preview.mp3';
-
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: url },
-        { shouldPlay: true, isLooping: true },
-      );
+      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, isLooping: true });
       soundRef.current = sound;
-    } catch (e) { console.log('Sound play error:', e); }
+    } catch (e) { console.log('[Sound] error:', e); }
   };
-
   const stopSound = async () => {
-    if (soundRef.current) {
-      try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch {}
-      soundRef.current = null;
-    }
+    if (soundRef.current) { try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch {} soundRef.current = null; }
   };
 
-  // ─── Signaling via DB changes ───────────────────────────────────────
+  // ─── DB signaling ───────────────────────────────────────────────────
   const setupSignaling = (uid: string) => {
-    console.log('[Call] Setting up DB signaling for:', uid);
-    if (subscriptionRef.current) subscriptionRef.current.unsubscribe();
+    console.log('[Sig] Listening for calls for:', uid);
+    subscriptionRef.current?.unsubscribe();
 
     subscriptionRef.current = supabase
-      .channel(`calls-listener-${uid}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'calls',
-      }, async (payload: any) => {
+      .channel(`calls-${uid}-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, async (payload: any) => {
         const call = payload.new || payload.old;
         if (!call) return;
 
-        // ── I am the RECEIVER ─────────────────────────────────────────
+        // ── RECEIVER side ──
         if (call.receiver_id === uid) {
           if (payload.eventType === 'INSERT') {
-            console.log('[Call] Incoming call from', call.caller_name);
+            console.log('[Sig] Incoming call from:', call.caller_name);
             setActiveCallId(call.id);
             setRemoteUserId(call.caller_id);
             setCaller({ id: call.caller_id, username: call.caller_name, avatar: call.caller_avatar });
             setStatus('ringing');
             playSound('ringing');
-          } else if (payload.eventType === 'UPDATE') {
-            if (call.status === 'ended' || call.status === 'rejected') {
-              cleanupCall();
-            }
-          } else if (payload.eventType === 'DELETE') {
-            cleanupCall();
           }
+          if (payload.eventType === 'UPDATE' && (call.status === 'ended' || call.status === 'rejected')) cleanupCall();
+          if (payload.eventType === 'DELETE') cleanupCall();
         }
 
-        // ── I am the CALLER ───────────────────────────────────────────
+        // ── CALLER side ──
         if (call.caller_id === uid) {
           if (payload.eventType === 'UPDATE') {
             if (call.status === 'connected' && call.answer) {
-              console.log('[Call] Remote accepted, setting answer');
+              console.log('[Sig] Caller: answer received, setting remote desc');
               stopSound();
               setStatus('connected');
-              if (pcRef.current) {
-                try {
-                  await pcRef.current.setRemoteDescription(
-                    new RTCSessionDescription(call.answer),
-                  );
-                  console.log('[Call] Caller: remote description set successfully');
-                } catch (e) { console.error('[Call] Answer error:', e); }
-              }
-            } else if (call.status === 'rejected' || call.status === 'ended') {
-              cleanupCall();
-              if (call.status === 'rejected')
-                Alert.alert('المكالمة', 'تم رفض المكالمة من قبل الطرف الآخر');
+              try {
+                if (pcRef.current) {
+                  await pcRef.current.setRemoteDescription({ type: call.answer.type, sdp: call.answer.sdp });
+                  console.log('[Sig] Caller: remote desc SET. connectionState:', pcRef.current.connectionState,
+                    'iceConnectionState:', pcRef.current.iceConnectionState);
+                }
+              } catch (e) { console.error('[Sig] Caller setRemoteDescription error:', e); }
             }
-          } else if (payload.eventType === 'DELETE') {
-            cleanupCall();
+            if (call.status === 'rejected' || call.status === 'ended') {
+              cleanupCall();
+              if (call.status === 'rejected') Alert.alert('المكالمة', 'تم رفض المكالمة من قبل الطرف الآخر');
+            }
           }
+          if (payload.eventType === 'DELETE') cleanupCall();
         }
       })
-      .subscribe((st) => { console.log('[Call] Signaling channel status:', st); });
+      .subscribe((s) => console.log('[Sig] channel status:', s));
   };
 
-  // ─── Start a call (CALLER) ──────────────────────────────────────────
-  const startCall = async (
-    targetUid: string,
-    targetUsername: string,
-    targetAvatar: string | null,
-  ) => {
+  // ─── Start call (CALLER) ────────────────────────────────────────────
+  const startCall = async (targetUid: string, targetUsername: string, targetAvatar: string | null) => {
     try {
-      // 1. Get microphone
+      console.log('[Call] Starting call to:', targetUsername);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
       setRemoteUserId(targetUid);
@@ -199,39 +196,45 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setStatus('calling');
       playSound('calling');
 
-      // 2. Get my profile info
+      // Get my info
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('No user');
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('username, avatar_url')
-        .eq('id', user.id)
-        .single();
-      const myUsername = profile?.username || user?.user_metadata?.username || 'مستخدم';
-      const myAvatar = profile?.avatar_url || user?.user_metadata?.avatar_url;
+      if (!user) throw new Error('Not authenticated');
+      const { data: profile } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
+      const myName = profile?.username || user?.user_metadata?.username || 'مستخدم';
+      const myAvatar = profile?.avatar_url || user?.user_metadata?.avatar_url || null;
 
-      // 3. Create PeerConnection
+      // Create peer connection
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
-      pc.ontrack = (event) => {
-        console.log('[Call] Caller received remote track');
-        setRemoteStream(event.streams[0]);
-      };
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // 4. Create offer and WAIT for all ICE candidates to be gathered
+      // Monitor connection state
+      pc.oniceconnectionstatechange = () => console.log('[PC-Caller] iceConnectionState:', pc.iceConnectionState);
+      pc.onconnectionstatechange = () => console.log('[PC-Caller] connectionState:', pc.connectionState);
+
+      pc.ontrack = (ev) => {
+        console.log('[PC-Caller] ontrack fired, streams:', ev.streams.length);
+        if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
+      };
+
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      // Create offer & wait for all ICE candidates
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      console.log('[Call] Waiting for ICE gathering…');
-      const fullOffer = await waitForIceGathering(pc);
-      console.log('[Call] ICE gathering complete. Candidates in SDP:', 
-        (fullOffer?.sdp?.match(/a=candidate/g) || []).length);
+      console.log('[Call] Waiting for ICE gathering...');
+      const fullOffer = await waitForIceComplete(pc);
+      const candidateCount = (fullOffer.sdp.match(/a=candidate/g) || []).length;
+      console.log('[Call] ICE done. Candidates:', candidateCount);
 
-      // 5. Insert call with FULL offer (including all ICE candidates)
+      if (candidateCount === 0) {
+        console.warn('[Call] WARNING: No ICE candidates gathered! STUN/TURN may be blocked.');
+      }
+
+      // Insert call row
       const { data, error } = await supabase.from('calls').insert([{
         caller_id: user.id,
         receiver_id: targetUid,
-        caller_name: myUsername,
+        caller_name: myName,
         caller_avatar: myAvatar,
         offer: fullOffer,
         status: 'ringing',
@@ -239,79 +242,73 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) throw error;
       setActiveCallId(data.id);
-      console.log('[Call] Call created:', data.id);
+      console.log('[Call] Call row created:', data.id);
 
     } catch (err) {
-      console.error('[Call] Start error:', err);
+      console.error('[Call] startCall error:', err);
       cleanupCall();
       Alert.alert('خطأ', 'تعذر بدء المكالمة، تأكد من صلاحيات الميكروفون.');
     }
   };
 
-  // ─── Accept a call (RECEIVER) ───────────────────────────────────────
+  // ─── Accept call (RECEIVER) ─────────────────────────────────────────
   const acceptCall = async () => {
     try {
-      // 1. Get microphone
+      console.log('[Call] Accepting call:', activeCallId);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
       setStatus('connected');
       stopSound();
 
-      // 2. Get the offer from DB
-      const { data: call } = await supabase
-        .from('calls')
-        .select('offer')
-        .eq('id', activeCallId)
-        .single();
-      if (!call?.offer) throw new Error('No offer found');
+      // Read the full offer from DB
+      const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
+      if (!call?.offer?.sdp) throw new Error('No valid offer in DB');
+      console.log('[Call] Offer SDP length:', call.offer.sdp.length,
+        'candidates:', (call.offer.sdp.match(/a=candidate/g) || []).length);
 
-      // 3. Create PeerConnection
+      // Create peer connection
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
-      pc.ontrack = (event) => {
-        console.log('[Call] Receiver received remote track');
-        setRemoteStream(event.streams[0]);
-      };
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // 4. Set the remote description (the full offer with ICE candidates)
-      await pc.setRemoteDescription(new RTCSessionDescription(call.offer));
+      pc.oniceconnectionstatechange = () => console.log('[PC-Recv] iceConnectionState:', pc.iceConnectionState);
+      pc.onconnectionstatechange = () => console.log('[PC-Recv] connectionState:', pc.connectionState);
+
+      pc.ontrack = (ev) => {
+        console.log('[PC-Recv] ontrack fired, streams:', ev.streams.length);
+        if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
+      };
+
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      // Set remote description (the full offer with embedded ICE candidates)
+      await pc.setRemoteDescription({ type: call.offer.type, sdp: call.offer.sdp });
       console.log('[Call] Receiver: remote description set');
 
-      // 5. Create answer and WAIT for all ICE candidates
+      // Create answer & wait for ICE
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      console.log('[Call] Waiting for ICE gathering…');
-      const fullAnswer = await waitForIceGathering(pc);
-      console.log('[Call] ICE gathering complete. Candidates in SDP:',
-        (fullAnswer?.sdp?.match(/a=candidate/g) || []).length);
+      console.log('[Call] Waiting for ICE gathering...');
+      const fullAnswer = await waitForIceComplete(pc);
+      const candidateCount = (fullAnswer.sdp.match(/a=candidate/g) || []).length;
+      console.log('[Call] ICE done. Candidates:', candidateCount);
 
-      // 6. Update DB with FULL answer (including all ICE candidates)
-      await supabase.from('calls').update({
-        status: 'connected',
-        answer: fullAnswer,
-      }).eq('id', activeCallId);
-
-      console.log('[Call] Answer sent via DB');
+      // Save answer to DB
+      await supabase.from('calls').update({ status: 'connected', answer: fullAnswer }).eq('id', activeCallId);
+      console.log('[Call] Answer saved to DB');
 
     } catch (err) {
-      console.error('[Call] Accept error:', err);
+      console.error('[Call] acceptCall error:', err);
       rejectCall();
     }
   };
 
-  // ─── Reject / End / Cleanup ─────────────────────────────────────────
+  // ─── Reject / End ───────────────────────────────────────────────────
   const rejectCall = async () => {
-    if (activeCallId) {
-      await supabase.from('calls').update({ status: 'rejected' }).eq('id', activeCallId);
-    }
+    if (activeCallId) await supabase.from('calls').update({ status: 'rejected' }).eq('id', activeCallId);
     cleanupCall();
   };
-
   const endCall = async () => {
-    if (activeCallId) {
-      await supabase.from('calls').update({ status: 'ended' }).eq('id', activeCallId);
-    }
+    if (activeCallId) await supabase.from('calls').update({ status: 'ended' }).eq('id', activeCallId);
     cleanupCall();
   };
 
@@ -322,41 +319,23 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveCallId(null);
     setIsMuted(false);
     stopSound();
-    if (localStream) {
-      localStream.getTracks().forEach((t) => t.stop());
-      setLocalStream(null);
-    }
+    stopRemoteAudio();
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); setLocalStream(null); }
     setRemoteStream(null);
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
   };
 
-  // ─── Mute toggle ───────────────────────────────────────────────────
+  // ─── Mute ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach((t) => { t.enabled = !isMuted; });
-    }
+    if (localStream) localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted; });
   }, [isMuted, localStream]);
 
-  // ─── Render ─────────────────────────────────────────────────────────
   return (
     <CallContext.Provider value={{
       status, caller, remoteUserId, localStream, remoteStream,
       startCall, acceptCall, rejectCall, endCall, isMuted, setIsMuted,
     }}>
       {children}
-      {Platform.OS === 'web' && remoteStream && (
-        <audio
-          autoPlay
-          playsInline
-          ref={(el) => {
-            if (el && el !== audioRef.current) {
-              audioRef.current = el;
-              el.srcObject = remoteStream;
-              el.play().catch((e) => console.log('[Call] Autoplay blocked:', e));
-            }
-          }}
-        />
-      )}
     </CallContext.Provider>
   );
 };
