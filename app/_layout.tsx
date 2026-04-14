@@ -9,6 +9,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/theme';
 import { CallProvider } from '../context/CallProvider';
 import { VoiceCallModal } from '../components/VoiceCallModal';
+import { NotificationProvider } from '../context/NotificationProvider';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -156,15 +157,17 @@ export default function RootLayout() {
 
   return (
     <CallProvider>
-      <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
-        <Stack.Screen name="index" options={{ title: 'Home' }} />
-        <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
-        <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
-        <Stack.Screen name="profile" options={{ title: 'Profile' }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-        <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
-      </Stack>
-      <VoiceCallModal />
+      <NotificationProvider>
+        <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+          <Stack.Screen name="index" options={{ title: 'Home' }} />
+          <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
+          <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
+          <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+          <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+          <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
+        </Stack>
+        <VoiceCallModal />
+      </NotificationProvider>
     </CallProvider>
   );
 }
