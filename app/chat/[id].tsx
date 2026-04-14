@@ -103,11 +103,8 @@ export default function ChatScreen() {
               const newMsg = payload.new;
               if ((newMsg.sender_id === uid && newMsg.receiver_id === id) || (newMsg.sender_id === id && newMsg.receiver_id === uid)) {
                 setMessages((prev) => {
-                  // If we find a temp message with same content from us, or same id, avoid dupe
                   const exists = prev.find(m => m.id === newMsg.id);
                   if (exists) return prev;
-                  
-                  // Filter out our own optimistic message if it exists (simple check by content and sender)
                   return [...prev.filter(m => !(m.isOptimistic && m.content === newMsg.content)), newMsg];
                 });
                 if (newMsg.sender_id === id) markMessagesAsRead(uid, id as string);
@@ -132,8 +129,11 @@ export default function ChatScreen() {
             await channelRef.current.track({ user_id: uid, is_typing: false });
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             console.log('Realtime Status:', status);
-            // Retry fetch messages on reconnect/error to ensure sync
-            if (isMounted && currentUserId) fetchMessages(currentUserId, id as string);
+            // Reconnect aggressively if app is foregrounded
+            if (isMounted && currentUserId) {
+               fetchMessages(currentUserId, id as string);
+               setTimeout(() => { if (isMounted) setupSubscription(uid); }, 3000);
+            }
           }
         });
     }
@@ -146,6 +146,7 @@ export default function ChatScreen() {
       if (nextAppState === 'active' && currentUserId && isMounted) {
         fetchMessages(currentUserId, id as string);
         fetchFriendStatus();
+        setupSubscription(currentUserId);
       }
     });
 
@@ -193,6 +194,7 @@ export default function ChatScreen() {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !currentUserId || isSending) return;
+    setIsSending(true);
     const msgText = newMessage.trim();
     setNewMessage('');
     setIsTyping(false);
@@ -207,23 +209,30 @@ export default function ChatScreen() {
       content: msgText,
       is_read: false,
       created_at: new Date().toISOString(),
-      isOptimistic: true, // Special flag to handle replacement
+      isOptimistic: true, 
     };
     
     setMessages(prev => [...prev, optimisticMsg]);
     if (channelRef.current) channelRef.current.track({ user_id: currentUserId, is_typing: false });
 
-    const { error } = await supabase.from('messages').insert([{ 
+    const { data: realMsg, error } = await supabase.from('messages').insert([{ 
       sender_id: currentUserId, 
       receiver_id: id, 
       content: msgText, 
       is_read: false 
-    }]);
+    }]).select().single();
 
     if (error) {
       Alert.alert('خطأ', 'فشل إرسال الرسالة');
       setMessages(prev => prev.filter(m => m.id !== tempId));
+    } else if (realMsg) {
+      setMessages(prev => {
+        const exists = prev.find(m => m.id === realMsg.id);
+        if (exists) return prev.filter(m => m.id !== tempId); // Already got via realtime
+        return prev.map(m => m.id === tempId ? realMsg : m);
+      });
     }
+    setIsSending(false);
   };
 
   const startRecording = async () => {
@@ -344,7 +353,7 @@ export default function ChatScreen() {
       
       const data = await res.json();
       if (data.secure_url) {
-        await supabase.from('messages').insert([{
+        const { data: realMsg } = await supabase.from('messages').insert([{
           sender_id: currentUserId,
           receiver_id: id,
           content: type === 'video' ? '📽️ فيديو' : '🖼️ صورة',
@@ -352,7 +361,14 @@ export default function ChatScreen() {
           file_url: data.secure_url,
           file_type: type,
           is_read: false
-        }]);
+        }]).select().single();
+        
+        if (realMsg) {
+           setMessages(prev => {
+             if (prev.find(m => m.id === realMsg.id)) return prev;
+             return [...prev, realMsg];
+           });
+        }
       }
     } catch (err) {
       Alert.alert('خطأ', 'فشل في رفع الملف');
@@ -402,7 +418,7 @@ export default function ChatScreen() {
       
       const data = await res.json();
       if (data.secure_url) {
-        await supabase.from('messages').insert([{
+        const { data: realMsg } = await supabase.from('messages').insert([{
           sender_id: currentUserId,
           receiver_id: id,
           content: `📄 ${name}`,
@@ -411,7 +427,14 @@ export default function ChatScreen() {
           file_type: 'file',
           payload: { name, size: data.bytes },
           is_read: false
-        }]);
+        }]).select().single();
+        
+        if (realMsg) {
+           setMessages(prev => {
+             if (prev.find(m => m.id === realMsg.id)) return prev;
+             return [...prev, realMsg];
+           });
+        }
       }
     } catch (err) {
       Alert.alert('خطأ', 'فشل في رفع المستند');
@@ -442,14 +465,21 @@ export default function ChatScreen() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'فشل الرفع لـ Cloudinary');
       
-      await supabase.from('messages').insert([{ 
+      const { data: realMsg } = await supabase.from('messages').insert([{ 
         sender_id: currentUserId, 
         receiver_id: id, 
         content: 'مقطع صوتي 🎵', 
         message_type: 'audio', 
         audio_url: data.secure_url, 
         is_read: false 
-      }]);
+      }]).select().single();
+      
+      if (realMsg) {
+         setMessages(prev => {
+           if (prev.find(m => m.id === realMsg.id)) return prev;
+           return [...prev, realMsg];
+         });
+      }
     } catch (err: any) {
       console.error('Audio Upload Error:', err);
       Alert.alert('خطأ في الإرسال', 'لم نتمكن من إرسال البصمة: ' + err.message);
