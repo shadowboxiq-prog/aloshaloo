@@ -42,6 +42,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -54,6 +55,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setCurrentUserId(session.user.id);
+        currentUserIdRef.current = session.user.id;
         setupSignaling(session.user.id);
       }
     };
@@ -63,9 +65,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       async (event, session) => {
         if (session) {
           setCurrentUserId(session.user.id);
+          currentUserIdRef.current = session.user.id;
           setupSignaling(session.user.id);
         } else {
           setCurrentUserId(null);
+          currentUserIdRef.current = null;
           if (subscriptionRef.current) subscriptionRef.current.unsubscribe();
           if (iceChannelRef.current) supabase.removeChannel(iceChannelRef.current);
         }
@@ -157,7 +161,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     iceChannelRef.current?.send({
                       type: 'broadcast',
                       event: 'candidate',
-                      payload: { candidate, from_id: currentUserId }
+                      payload: { candidate, from_id: currentUserIdRef.current }
                     });
                   });
                 } catch (e) { console.error('Answer error:', e); }
@@ -184,7 +188,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     iceChannelRef.current = supabase.channel(`ice:${callId}`);
     iceChannelRef.current
       .on('broadcast', { event: 'candidate' }, async ({ payload }: any) => {
-        if (payload.from_id !== currentUserId && payload.candidate) {
+        if (payload.from_id !== currentUserIdRef.current && payload.candidate) {
           if (pcRef.current && pcRef.current.remoteDescription) {
             try {
               await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
@@ -200,7 +204,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             iceChannelRef.current.send({
               type: 'broadcast',
               event: 'candidate',
-              payload: { candidate, from_id: currentUserId }
+              payload: { candidate, from_id: currentUserIdRef.current }
             });
           });
           iceQueueRef.current = [];
@@ -219,7 +223,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             iceChannelRef.current.send({
               type: 'broadcast',
               event: 'candidate',
-              payload: { candidate: event.candidate, from_id: currentUserId }
+              payload: { candidate: event.candidate, from_id: currentUserIdRef.current }
             });
         }
       }
@@ -263,7 +267,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             iceChannelRef.current.send({
               type: 'broadcast',
               event: 'candidate',
-              payload: { candidate: event.candidate, from_id: currentUserId }
+              payload: { candidate: event.candidate, from_id: currentUserIdRef.current }
             });
           }
         }
@@ -275,7 +279,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await pc.setLocalDescription(offer);
 
       const { data, error } = await supabase.from('calls').insert([{
-        caller_id: currentUserId,
+        caller_id: currentUserIdRef.current,
         receiver_id: targetUid,
         caller_name: myUsername,
         caller_avatar: myAvatar,
