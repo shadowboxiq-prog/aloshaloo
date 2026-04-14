@@ -162,21 +162,25 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const iceQueueRef = useRef<RTCIceCandidate[]>([]);
+  const incomingIceQueueRef = useRef<RTCIceCandidateInit[]>([]);
 
   const setupIceChannel = (callId: string) => {
     if (iceChannelRef.current) supabase.removeChannel(iceChannelRef.current);
     iceChannelRef.current = supabase.channel(`ice:${callId}`);
     iceChannelRef.current
       .on('broadcast', { event: 'candidate' }, async ({ payload }: any) => {
-        if (payload.from_id !== currentUserId && pcRef.current && payload.candidate) {
-          try {
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
-          } catch (e) { console.error('ICE add error:', e); }
+        if (payload.from_id !== currentUserId && payload.candidate) {
+          if (pcRef.current && pcRef.current.remoteDescription) {
+            try {
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            } catch (e) { console.error('ICE add error:', e); }
+          } else {
+            incomingIceQueueRef.current.push(payload.candidate);
+          }
         }
       })
       .subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
-          // Send any queued candidates now that we are subscribed
           iceQueueRef.current.forEach(candidate => {
             iceChannelRef.current.send({
               type: 'broadcast',
@@ -228,6 +232,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const myAvatar = user?.user_metadata?.avatar_url;
 
       iceQueueRef.current = [];
+      incomingIceQueueRef.current = [];
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
@@ -283,6 +288,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       createPeerConnection(remoteUserId!, activeCallId!);
       await pcRef.current?.setRemoteDescription(new RTCSessionDescription(call.offer));
+
+      // Flush incoming ICE queue now that remote description is set
+      for (const candidate of incomingIceQueueRef.current) {
+        try { await pcRef.current?.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+      }
+      incomingIceQueueRef.current = [];
+
       const answer = await pcRef.current?.createAnswer();
       await pcRef.current?.setLocalDescription(answer);
 
@@ -325,6 +337,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRemoteStream(null);
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (iceChannelRef.current) { supabase.removeChannel(iceChannelRef.current); iceChannelRef.current = null; }
+    iceQueueRef.current = [];
+    incomingIceQueueRef.current = [];
   };
 
   useEffect(() => {
@@ -342,8 +356,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {Platform.OS === 'web' && remoteStream && (
         <audio
           autoPlay
+          playsInline
           ref={(audio) => {
-            if (audio) {
+            if (audio && audio.srcObject !== remoteStream) {
               audio.srcObject = remoteStream;
               audio.play().catch(e => console.log('Autoplay blocked:', e));
             }
