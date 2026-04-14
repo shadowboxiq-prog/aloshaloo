@@ -145,6 +145,21 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (pcRef.current) {
                 try {
                   await pcRef.current.setRemoteDescription(new RTCSessionDescription(call.answer));
+
+                  // Flush incoming ICE queue now that remote description is set
+                  for (const candidate of incomingIceQueueRef.current) {
+                    try { await pcRef.current?.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+                  }
+                  incomingIceQueueRef.current = [];
+
+                  // RESEND OUR GATHERED ICE CANDIDATES OVER BROADCAST NOW THAT WE KNOW REMOTE IS LISTENING
+                  iceQueueRef.current.forEach(candidate => {
+                    iceChannelRef.current?.send({
+                      type: 'broadcast',
+                      event: 'candidate',
+                      payload: { candidate, from_id: currentUserId }
+                    });
+                  });
                 } catch (e) { console.error('Answer error:', e); }
               }
             } else if (call.status === 'rejected' || call.status === 'ended') {
@@ -199,14 +214,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     pcRef.current = pc;
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        iceQueueRef.current.push(event.candidate);
         if (iceChannelRef.current && activeCallId) {
             iceChannelRef.current.send({
               type: 'broadcast',
               event: 'candidate',
               payload: { candidate: event.candidate, from_id: currentUserId }
             });
-        } else {
-            iceQueueRef.current.push(event.candidate);
         }
       }
     };
@@ -244,14 +258,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pcRef.current = pc;
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          iceQueueRef.current.push(event.candidate);
           if (iceChannelRef.current) {
             iceChannelRef.current.send({
               type: 'broadcast',
               event: 'candidate',
               payload: { candidate: event.candidate, from_id: currentUserId }
             });
-          } else {
-            iceQueueRef.current.push(event.candidate);
           }
         }
       };
