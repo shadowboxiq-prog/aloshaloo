@@ -490,7 +490,13 @@ export default function ChatScreen() {
         <View style={styles.headerRight}>
            <TouchableOpacity 
              style={styles.iconCircle} 
-             onPress={() => startCall(id as string, username as string, friendAvatar)}
+             onPress={() => startCall(id as string, username as string, friendAvatar, true)}
+           >
+             <Ionicons name="videocam" size={22} color={Colors.primary} />
+           </TouchableOpacity>
+           <TouchableOpacity 
+             style={styles.iconCircle} 
+             onPress={() => startCall(id as string, username as string, friendAvatar, false)}
            >
              <Ionicons name="call" size={22} color={Colors.primary} />
            </TouchableOpacity>

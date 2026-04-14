@@ -11,12 +11,14 @@ interface CallContextType {
   remoteUserId: string | null;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
-  startCall: (targetUserId: string, targetUsername: string, targetAvatar: string | null) => Promise<void>;
+  startCall: (targetUserId: string, targetUsername: string, targetAvatar: string | null, isVideo?: boolean) => Promise<void>;
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   endCall: () => void;
   isMuted: boolean;
   setIsMuted: (muted: boolean) => void;
+  isVideoCall: boolean;
+  toggleCamera: () => void;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -74,6 +76,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [isVideoCall, setIsVideoCall] = useState(false);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -146,17 +149,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const call = payload.new || payload.old;
         if (!call) return;
 
-        // ── RECEIVER ──
         if (call.receiver_id === uid) {
           if (payload.eventType === 'INSERT') {
             setActiveCallId(call.id);
             setRemoteUserId(call.caller_id);
             setCaller({ id: call.caller_id, username: call.caller_name, avatar: call.caller_avatar });
+            setIsVideoCall(!!call.is_video);
             setStatus('ringing');
             playSound('ringing');
 
-            // Pre-request microphone while ringing (so accept is instant)
-            navigator.mediaDevices.getUserMedia({ audio: true })
+            // Pre-request microphone (and camera if video) while ringing (so accept is instant)
+            navigator.mediaDevices.getUserMedia({ audio: true, video: !!call.is_video })
               .then(s => { preStreamRef.current = s; })
               .catch(() => {});
 
@@ -193,13 +196,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // ─── Start call (CALLER) ────────────────────────────────────────────
-  const startCall = async (targetUid: string, targetUsername: string, targetAvatar: string | null) => {
+  const startCall = async (targetUid: string, targetUsername: string, targetAvatar: string | null, isVideo = false) => {
     try {
-      // ① Get mic + set UI simultaneously
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // ① Get mic/cam + set UI simultaneously
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
       setLocalStream(stream);
       setRemoteUserId(targetUid);
       setCaller({ id: targetUid, username: targetUsername, avatar: targetAvatar });
+      setIsVideoCall(isVideo);
       setStatus('calling');
       playSound('calling');
 
@@ -224,6 +228,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         caller_avatar: myAvatar,
         offer: null,
         status: 'ringing',
+        is_video: isVideo,
       }]).select().single();
       if (error) throw error;
       setActiveCallId(data.id);
@@ -243,7 +248,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const acceptCall = async () => {
     try {
       // ① Use pre-cached mic stream, or get new one
-      const stream = preStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = preStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
       preStreamRef.current = null;
       setLocalStream(stream);
       setStatus('connected');
@@ -297,6 +302,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRemoteUserId(null);
     setActiveCallId(null);
     setIsMuted(false);
+    setIsVideoCall(false);
     stopSound();
     stopRemoteAudio();
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); setLocalStream(null); }
@@ -307,6 +313,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     cachedOfferRef.current = null;
   };
 
+  const toggleCamera = () => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
+    }
+  };
+
   useEffect(() => {
     if (localStream) localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted; });
   }, [isMuted, localStream]);
@@ -315,6 +327,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CallContext.Provider value={{
       status, caller, remoteUserId, localStream, remoteStream,
       startCall, acceptCall, rejectCall, endCall, isMuted, setIsMuted,
+      isVideoCall, toggleCamera
     }}>
       {children}
     </CallContext.Provider>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, Image, Platform, Dimensions } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,8 +9,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const VoiceCallModal: React.FC = () => {
-  const { status, caller, acceptCall, rejectCall, endCall, isMuted, setIsMuted } = useCall();
+  const { status, caller, acceptCall, rejectCall, endCall, isMuted, setIsMuted, isVideoCall, toggleCamera, localStream, remoteStream } = useCall();
   const [timer, setTimer] = useState(0);
+
+  const localVideoRef = useRef<any>(null);
+  const remoteVideoRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, status]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, status]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -44,7 +59,7 @@ export const VoiceCallModal: React.FC = () => {
 
         <View style={styles.content}>
           <View style={styles.topSection}>
-            <View style={styles.avatarContainer}>
+            <View style={[styles.avatarContainer, isVideoCall && isConnected ? { opacity: 0 } : {}]}>
               <View style={styles.avatarBorder}>
                 {caller?.avatar ? (
                   <Image source={{ uri: caller.avatar }} style={styles.avatar} />
@@ -61,13 +76,41 @@ export const VoiceCallModal: React.FC = () => {
               )}
             </View>
             
-            <Text style={styles.username}>{caller?.username}</Text>
-            <Text style={styles.statusText}>
-              {isIncoming ? 'يتصل بك...' : 
-               isOutgoing ? 'جاري الاتصال...' : 
-               isConnected ? formatTime(timer) : 'انتهت المكالمة'}
-            </Text>
+            {!isVideoCall || !isConnected ? (
+              <>
+                <Text style={styles.username}>{caller?.username}</Text>
+                <Text style={styles.statusText}>
+                  {isIncoming ? (isVideoCall ? 'مكالمة فيديو واردة...' : 'يتصل بك...') : 
+                   isOutgoing ? 'جاري الاتصال...' : 
+                   isConnected ? formatTime(timer) : 'انتهت المكالمة'}
+                </Text>
+              </>
+            ) : null}
           </View>
+
+          {/* Video Streams rendering */}
+          {isVideoCall && Platform.OS === 'web' && isConnected && (
+            <View style={StyleSheet.absoluteFill}>
+              {Platform.OS === 'web' && React.createElement('video', {
+                ref: remoteVideoRef,
+                autoPlay: true,
+                playsInline: true,
+                style: { width: '100%', height: '100%', objectFit: 'cover' }
+              })}
+            </View>
+          )}
+
+          {isVideoCall && Platform.OS === 'web' && (
+            <View style={styles.pipContainer}>
+              {Platform.OS === 'web' && React.createElement('video', {
+                ref: localVideoRef,
+                autoPlay: true,
+                playsInline: true,
+                muted: true,
+                style: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }
+              })}
+            </View>
+          )}
 
           <View style={styles.bottomSection}>
             <View style={styles.controlsRow}>
@@ -89,7 +132,7 @@ export const VoiceCallModal: React.FC = () => {
                   </TouchableOpacity>
                   
                   <TouchableOpacity style={[styles.mainBtn, styles.acceptBtn]} onPress={acceptCall}>
-                    <Ionicons name="call" size={32} color={Colors.white} />
+                    <Ionicons name={isVideoCall ? "videocam" : "call"} size={32} color={Colors.white} />
                     <Text style={styles.btnLabel}>قبول</Text>
                   </TouchableOpacity>
                 </>
@@ -100,7 +143,13 @@ export const VoiceCallModal: React.FC = () => {
                 </TouchableOpacity>
               )}
 
-              {isConnected && (
+              {isConnected && isVideoCall && (
+                <TouchableOpacity style={styles.smallBtn} onPress={toggleCamera}>
+                   <Ionicons name="camera-reverse" size={24} color={Colors.white} />
+                   <Text style={styles.btnLabel}>الكاميرا</Text>
+                </TouchableOpacity>
+              )}
+              {isConnected && !isVideoCall && (
                 <TouchableOpacity style={styles.smallBtn}>
                    <Ionicons name="volume-high" size={24} color={Colors.white} />
                    <Text style={styles.btnLabel}>مكبر</Text>
@@ -116,7 +165,7 @@ export const VoiceCallModal: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  content: { flex: 1, width: '100%', justifyContent: 'space-between', paddingVertical: 80, alignItems: 'center' },
+  content: { flex: 1, width: '100%', justifyContent: 'space-between', paddingVertical: 80, alignItems: 'center', zIndex: 10 },
   topSection: { alignItems: 'center' },
   avatarContainer: { position: 'relative', marginBottom: 24 },
   avatarBorder: {
@@ -166,5 +215,19 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
     opacity: 0.5,
     // Add animation later if possible with Reanimated
+  },
+  pipContainer: {
+    position: 'absolute',
+    bottom: 180,
+    right: 20,
+    width: 120,
+    height: 160,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
+    ...Shadow.premium,
+    zIndex: 20,
   }
 });
