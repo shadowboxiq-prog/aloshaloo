@@ -193,7 +193,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   };
 
-  const createPeerConnection = (targetUid: string, callId: string) => {
+  const createPeerConnection = (targetUid: string, callId: string, stream?: MediaStream | null) => {
     if (pcRef.current) return;
     const pc = new RTCPeerConnection(ICE_SERVERS);
     pcRef.current = pc;
@@ -211,10 +211,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
     pc.ontrack = (event) => {
+      console.log('Received remote track', event.streams[0]);
       setRemoteStream(event.streams[0]);
     };
-    if (localStream) {
-      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+    
+    const activeStream = stream || localStream;
+    if (activeStream) {
+      activeStream.getTracks().forEach((track) => pc.addTrack(track, activeStream));
     }
   };
 
@@ -228,8 +231,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       playSound('calling');
 
       const { data: { user } } = await supabase.auth.getUser();
-      const myUsername = user?.user_metadata?.username || 'مستخدم';
-      const myAvatar = user?.user_metadata?.avatar_url;
+      if (!user) throw new Error('No user');
+      
+      const { data: profile } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
+      const myUsername = profile?.username || user?.user_metadata?.username || 'مستخدم';
+      const myAvatar = profile?.avatar_url || user?.user_metadata?.avatar_url;
 
       iceQueueRef.current = [];
       incomingIceQueueRef.current = [];
@@ -286,7 +292,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
       if (!call?.offer) throw new Error('No offer found');
 
-      createPeerConnection(remoteUserId!, activeCallId!);
+      createPeerConnection(remoteUserId!, activeCallId!, stream);
       await pcRef.current?.setRemoteDescription(new RTCSessionDescription(call.offer));
 
       // Flush incoming ICE queue now that remote description is set
