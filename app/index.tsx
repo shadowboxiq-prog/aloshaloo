@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Image as RNImage, Platform, ScrollView } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Image as RNImage, Platform, ScrollView, Modal, Dimensions, AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { formatLastSeenArabic } from '../lib/date-utils';
+import * as ImagePicker from 'expo-image-picker';
+import { Video, ResizeMode } from 'expo-av';
 
 export default function HomeScreen() {
   const [chats, setChats] = useState<any[]>([]);
@@ -16,6 +18,9 @@ export default function HomeScreen() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const [stories, setStories] = useState<any[]>([]);
+  const [viewingStory, setViewingStory] = useState<{userIndex: number, storyIndex: number} | null>(null);
+  const [isUploadingStory, setIsUploadingStory] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -25,7 +30,9 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!currentUser) return;
 
-    const channelId = `user-activity-${currentUser.id}-${Math.floor(Math.random() * 10000)}`;
+    let isMounted = true;
+    const channelId = `user-activity-${currentUser.id}`;
+    
     const channel = supabase
       .channel(channelId)
       .on('postgres_changes', { 
@@ -34,26 +41,35 @@ export default function HomeScreen() {
         table: 'friends',
         filter: `friend_id=eq.${currentUser.id}` 
       }, () => {
-        fetchPendingCount(currentUser.id);
+        if (isMounted) fetchPendingCount(currentUser.id);
       })
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'chats'
       }, () => {
-        fetchChats(currentUser.id);
+        if (isMounted) fetchChats(currentUser.id);
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+           console.log('Home Subscription Status:', status);
+           if (isMounted) fetchChats(currentUser.id);
+        }
+      });
 
-    const handleSync = (e: any) => {
-      setOnlineUsers(new Set(e.detail.ids));
-    };
-    
-    window.addEventListener('presence-sync', handleSync);
+    const appStateListener = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && isMounted) {
+        fetchChats(currentUser.id);
+        fetchFriends(currentUser.id);
+        fetchPendingCount(currentUser.id);
+        fetchStories();
+      }
+    });
 
     return () => {
+      isMounted = false;
       supabase.removeChannel(channel);
-      window.removeEventListener('presence-sync', handleSync);
+      appStateListener.remove();
     };
   }, [currentUser]);
 
@@ -67,7 +83,8 @@ export default function HomeScreen() {
     await Promise.all([
       fetchChats(session.user.id), 
       fetchFriends(session.user.id),
-      fetchPendingCount(session.user.id)
+      fetchPendingCount(session.user.id),
+      fetchStories()
     ]);
     setLoading(false);
   };
@@ -120,6 +137,79 @@ export default function HomeScreen() {
     }
   };
 
+  const fetchStories = async () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('stories')
+      .select('*, profiles(username, avatar_url)')
+      .gt('created_at', yesterday)
+      .order('created_at', { ascending: true });
+
+    if (!error && data) {
+      // Group stories by user_id
+      const grouped = data.reduce((acc: any, story: any) => {
+        if (!acc[story.user_id]) {
+          acc[story.user_id] = {
+            user: story.profiles,
+            items: []
+          };
+        }
+        acc[story.user_id].items.push(story);
+        return acc;
+      }, {});
+      setStories(Object.values(grouped));
+    }
+  };
+
+  const handleAddStory = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 0.7,
+      });
+
+      if (!result.canceled) {
+        const asset = result.assets[0];
+        const caption = Platform.OS === 'web' 
+          ? window.prompt('اكتب تعليقاً لقصتك (اختياري)...') 
+          : ''; // Native prompt could be added here if needed
+
+        setIsUploadingStory(true);
+        const formData = new FormData();
+        formData.append('upload_preset', 'chat_unsigned');
+        
+        if (Platform.OS === 'web') {
+          const resp = await fetch(asset.uri);
+          const blob = await resp.blob();
+          formData.append('file', blob, asset.type === 'video' ? 'video.mp4' : 'image.jpg');
+        } else {
+          formData.append('file', { uri: asset.uri, name: 'story', type: asset.type === 'video' ? 'video/mp4' : 'image/jpeg' } as any);
+        }
+
+        const endpoint = asset.type === 'video' ? 'video' : 'image';
+        const res = await fetch(`https://api.cloudinary.com/v1_1/dpdyevp6z/${endpoint}/upload`, { 
+          method: 'POST', 
+          body: formData 
+        });
+        
+        const data = await res.json();
+        if (data.secure_url) {
+          const { error } = await supabase.from('stories').insert([{
+            user_id: currentUser.id,
+            media_url: data.secure_url,
+            media_type: asset.type === 'video' ? 'video' : 'image',
+            caption: caption || ''
+          }]);
+          if (!error) fetchStories();
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsUploadingStory(false);
+    }
+  };
+
   const renderTopAppBar = () => (
     <BlurView intensity={80} tint="light" style={styles.header}>
       <TouchableOpacity onPress={() => router.push('/profile')} style={styles.profileBtn}>
@@ -144,8 +234,8 @@ export default function HomeScreen() {
     </BlurView>
   );
 
-  const renderStoryPulsing = ({ item }: { item: any }) => (
-    <TouchableOpacity style={styles.storyItem}>
+  const renderStoryPulsing = ({ item, index }: { item: any, index: number }) => (
+    <TouchableOpacity style={styles.storyItem} onPress={() => setViewingStory({ userIndex: index, storyIndex: 0 })}>
       <LinearGradient
         colors={Gradients.pulse}
         start={{ x: 0, y: 0 }}
@@ -154,15 +244,15 @@ export default function HomeScreen() {
       >
         <View style={styles.storyAvatarWrap}>
           <View style={[styles.squircleAvatar, { backgroundColor: Colors.surfaceContainerHigh }]}>
-            {item.profiles.avatar_url ? (
-              <Image source={{ uri: item.profiles.avatar_url }} style={styles.fullImg} />
+            {item.user.avatar_url ? (
+              <Image source={{ uri: item.user.avatar_url }} style={styles.fullImg} />
             ) : (
-              <Text style={styles.avatarInitial}>{item.profiles.username[0].toUpperCase()}</Text>
+              <Text style={styles.avatarInitial}>{item.user.username[0].toUpperCase()}</Text>
             )}
           </View>
         </View>
       </LinearGradient>
-      <Text style={styles.storyName} numberOfLines={1}>{item.profiles.username}</Text>
+      <Text style={styles.storyName} numberOfLines={1}>{item.user.username}</Text>
     </TouchableOpacity>
   );
 
@@ -259,16 +349,20 @@ export default function HomeScreen() {
           <FlatList
             horizontal
             showsHorizontalScrollIndicator={false}
-            data={friends}
-            keyExtractor={(item) => item.friend_id}
+            data={stories}
+            keyExtractor={(item, idx) => idx.toString()}
             renderItem={renderStoryPulsing}
             contentContainerStyle={styles.storiesList}
             ListHeaderComponent={() => (
-              <TouchableOpacity style={styles.addStoryItem}>
-                <View style={styles.addStoryIcon}>
-                  <Ionicons name="add" size={30} color={Colors.white} />
+              <TouchableOpacity style={styles.addStoryItem} onPress={handleAddStory} disabled={isUploadingStory}>
+                <View style={[styles.addStoryIcon, isUploadingStory && { opacity: 0.5 }]}>
+                  {isUploadingStory ? (
+                    <ActivityIndicator color={Colors.white} />
+                  ) : (
+                    <Ionicons name="add" size={30} color={Colors.white} />
+                  )}
                 </View>
-                <Text style={styles.storyName}>قصتك</Text>
+                <Text style={styles.storyName}>{isUploadingStory ? 'جاري الرفع...' : 'قصتك'}</Text>
               </TouchableOpacity>
             )}
           />
@@ -305,6 +399,142 @@ export default function HomeScreen() {
             <Ionicons name="settings-outline" size={26} color={Colors.onSurfaceVariant} />
          </TouchableOpacity>
       </BlurView>
+
+      {/* Story Viewer Modal */}
+      <Modal visible={viewingStory !== null} transparent animationType="fade">
+        <StoryViewer 
+          stories={stories} 
+          viewingState={viewingStory} 
+          currentUser={currentUser}
+          onClose={() => setViewingStory(null)} 
+          onUpdateState={setViewingStory}
+          onDelete={async (storyId: string) => {
+             const { error } = await supabase.from('stories').delete().eq('id', storyId);
+             if (!error) {
+                fetchStories();
+                setViewingStory(null);
+             }
+          }}
+        />
+      </Modal>
+    </View>
+  );
+}
+
+// Internal component for the Story Viewer effect
+function StoryViewer({ stories, viewingState, onClose, onUpdateState, currentUser, onDelete }: any) {
+  const [progress, setProgress] = useState(0);
+  const { userIndex, storyIndex } = viewingState || { userIndex: 0, storyIndex: 0 };
+  const userStories = stories[userIndex]?.items || [];
+  const currentStory = userStories[storyIndex];
+
+  useEffect(() => {
+    if (!viewingState) return;
+    
+    setProgress(0);
+    const duration = 5000; // 5 seconds
+    const interval = 50;
+    const step = 100 / (duration / interval);
+
+    const timer = setInterval(() => {
+      setProgress(p => {
+        if (p >= 100) {
+          clearInterval(timer);
+          handleNext();
+          return 100;
+        }
+        return p + step;
+      });
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, [viewingState]);
+
+  const handleNext = () => {
+    if (storyIndex < userStories.length - 1) {
+      onUpdateState({ userIndex, storyIndex: storyIndex + 1 });
+    } else if (userIndex < stories.length - 1) {
+      onUpdateState({ userIndex: userIndex + 1, storyIndex: 0 });
+    } else {
+      onClose();
+    }
+  };
+
+  const handlePrev = () => {
+    if (storyIndex > 0) {
+      onUpdateState({ userIndex, storyIndex: storyIndex - 1 });
+    } else if (userIndex > 0) {
+      onUpdateState({ userIndex: userIndex - 1, storyIndex: stories[userIndex-1].items.length - 1 });
+    }
+  };
+
+  if (!currentStory) return null;
+
+  return (
+    <View style={styles.viewerFull}>
+      <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFill} />
+      
+      {/* Interaction Layers */}
+      <View style={styles.gestureContainer}>
+        <TouchableOpacity style={styles.gestureSide} onPress={handlePrev} />
+        <TouchableOpacity style={styles.gestureSide} onPress={handleNext} />
+      </View>
+
+      <View style={styles.viewerHeader}>
+        <View style={styles.progressRow}>
+          {userStories.map((_: any, idx: number) => (
+            <View key={idx} style={styles.progressBarBg}>
+              <View 
+                style={[
+                  styles.progressBarFill, 
+                  { width: idx < storyIndex ? '100%' : idx === storyIndex ? `${progress}%` : '0%' }
+                ]} 
+              />
+            </View>
+          ))}
+        </View>
+        <View style={styles.viewerUserRow}>
+          <Image source={{ uri: stories[userIndex].user.avatar_url }} style={styles.viewerAvatar} />
+          <View>
+            <Text style={styles.viewerUserName}>{stories[userIndex].user.username}</Text>
+            <Text style={styles.viewerTime}>منذ قليل</Text>
+          </View>
+          
+          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', gap: 15 }}>
+            {currentStory.user_id === currentUser?.id && (
+              <TouchableOpacity onPress={() => onDelete(currentStory.id)} style={styles.viewerDeleteBtn}>
+                <Ionicons name="trash-outline" size={24} color="#ff4b4b" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={onClose} style={styles.viewerCloseBtn}>
+              <Ionicons name="close" size={28} color="white" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.viewerContent}>
+        {currentStory.media_type === 'video' ? (
+          <Video
+            source={{ uri: currentStory.media_url }}
+            style={styles.viewerMedia}
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+            isLooping={false}
+            onPlaybackStatusUpdate={(status: any) => {
+              if (status.didJustFinish) handleNext();
+            }}
+          />
+        ) : (
+          <Image source={{ uri: currentStory.media_url }} style={styles.viewerMedia} contentFit="contain" />
+        )}
+      </View>
+
+      {currentStory.caption ? (
+        <BlurView intensity={20} tint="dark" style={styles.captionArea}>
+           <Text style={styles.captionText}>{currentStory.caption}</Text>
+        </BlurView>
+      ) : null}
     </View>
   );
 }
@@ -404,5 +634,24 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 10,
     fontWeight: '800',
-  }
+  },
+
+  // Viewer Styles
+  viewerFull: { flex: 1, backgroundColor: 'black' },
+  viewerHeader: { position: 'absolute', top: 50, left: 0, right: 0, zIndex: 100, paddingHorizontal: 16 },
+  progressRow: { flexDirection: 'row', gap: 4, marginBottom: 12 },
+  progressBarBg: { flex: 1, height: 2, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1 },
+  progressBarFill: { height: 2, backgroundColor: 'white', borderRadius: 1 },
+  viewerUserRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  viewerAvatar: { width: 40, height: 40, borderRadius: 20 },
+  viewerUserName: { color: 'white', fontWeight: '800', fontSize: 16 },
+  viewerTime: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
+  viewerDeleteBtn: { padding: 4 },
+  viewerCloseBtn: { padding: 4 },
+  viewerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  viewerMedia: { width: '100%', height: '100%' },
+  gestureContainer: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 50 },
+  gestureSide: { flex: 1 },
+  captionArea: { position: 'absolute', bottom: 60, left: 20, right: 20, padding: 16, borderRadius: Radius.lg, alignItems: 'center' },
+  captionText: { color: 'white', fontSize: 16, fontWeight: '600', textAlign: 'center' }
 });

@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { View, ActivityIndicator, Text } from 'react-native';
+import { View, ActivityIndicator, Text, Platform } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/theme';
+import { CallProvider } from '../context/CallProvider';
+import { VoiceCallModal } from '../components/VoiceCallModal';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -18,8 +20,8 @@ export default function RootLayout() {
   const router = useRouter();
 
   const [loaded, error] = useFonts({
-    ...Ionicons.font,
-    ...MaterialIcons.font,
+    'Ionicons': require('../assets/fonts/Ionicons.ttf'),
+    'MaterialIcons': require('../assets/fonts/MaterialIcons.ttf'),
   });
 
   useEffect(() => {
@@ -39,17 +41,33 @@ export default function RootLayout() {
       }
     }, 3000);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      clearTimeout(timeout);
-      setSession(session);
-      setInitialized(true);
-    }).catch(err => {
-      clearTimeout(timeout);
-      setInitialized(true);
-    });
+    const handleInitialSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Session error:', error.message);
+          if (error.message.includes('refresh_token') || error.message.includes('not found')) {
+            await supabase.auth.signOut();
+          }
+        }
+        setSession(session);
+      } catch (err) {
+        console.error('Fatal Auth Error:', err);
+      } finally {
+        clearTimeout(timeout);
+        setInitialized(true);
+      }
+    };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    handleInitialSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        setSession(session);
+      } else if (event === 'USER_UPDATED' && !session) {
+        // Handle cases where user might have been deleted or invalid session
+        setSession(null);
+      }
     });
 
     return () => {
@@ -73,8 +91,8 @@ export default function RootLayout() {
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const ids = Object.keys(state);
-        // Custom event for other components
-        if (typeof window !== 'undefined') {
+        // Custom event for other components (Web only)
+        if (Platform.OS === 'web' && typeof CustomEvent !== 'undefined') {
           window.dispatchEvent(new CustomEvent('presence-sync', { detail: { ids } }));
         }
       })
@@ -137,13 +155,16 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
-      <Stack.Screen name="index" options={{ title: 'Home' }} />
-      <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
-      <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
-      <Stack.Screen name="profile" options={{ title: 'Profile' }} />
-      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-      <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
-    </Stack>
+    <CallProvider>
+      <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+        <Stack.Screen name="index" options={{ title: 'Home' }} />
+        <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
+        <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
+        <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
+      </Stack>
+      <VoiceCallModal />
+    </CallProvider>
   );
 }

@@ -2,13 +2,16 @@
   "name": "chat-up",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "homepage": "https://shadowboxiq-prog.github.io/aloshaloo",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "predeploy": "npx expo export --platform web",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -20,14 +23,15 @@
     "blurhash": "^2.0.5",
     "expo": "~54.0.33",
     "expo-av": "~16.0.8",
-    "expo-blur": "^55.0.14",
+    "expo-blur": "~15.0.8",
     "expo-constants": "~18.0.13",
+    "expo-document-picker": "~14.0.8",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "~17.0.10",
-    "expo-linear-gradient": "^55.0.13",
+    "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.23",
     "expo-splash-screen": "~31.0.13",
@@ -51,6 +55,7 @@
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "gh-pages": "^6.3.0",
     "typescript": "~5.9.2"
   },
   "private": true

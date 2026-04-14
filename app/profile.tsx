@@ -63,10 +63,10 @@ export default function ProfileScreen() {
         const file = e.target.files[0]; if (!file) return;
         setUploading(true);
         const formData = new FormData();
-        formData.append('upload_preset', 'chat_app_unsigned');
+        formData.append('upload_preset', 'chat_unsigned');
         formData.append('file', file);
         try {
-          const res = await fetch('https://api.cloudinary.com/v1_1/dy8sl8fzs/image/upload', { method: 'POST', body: formData });
+          const res = await fetch('https://api.cloudinary.com/v1_1/dpdyevp6z/image/upload', { method: 'POST', body: formData });
           const data = await res.json();
           await supabase.from('profiles').update({ avatar_url: data.secure_url }).eq('id', userId);
           setAvatarUrl(data.secure_url);
