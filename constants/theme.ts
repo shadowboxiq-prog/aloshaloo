@@ -26,6 +26,7 @@ export const Colors = {
   white: '#ffffff',
   black: '#38274c', // We don't use pure black
   glassBg: 'rgba(253, 243, 255, 0.7)',
+  readReceipt: '#4fc3f7',
 };
 
 export const Gradients = {

@@ -589,7 +589,12 @@ export default function ChatScreen() {
                     {!isMedia && item.message_type !== 'file' && <Text style={styles.myTxt}>{item.content}</Text>}
                     <View style={styles.meta}>
                       <Text style={styles.myTime}>{new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-                      <Ionicons name={item.is_read ? 'checkmark-done' : 'checkmark'} size={14} color={Colors.white} style={{ marginLeft: 4 }} />
+                      <Ionicons 
+                        name={item.is_read ? 'checkmark-done' : 'checkmark'} 
+                        size={14} 
+                        color={item.is_read ? Colors.readReceipt : Colors.white} 
+                        style={{ marginLeft: 4 }} 
+                      />
                     </View>
                   </LinearGradient>
                 ) : (
