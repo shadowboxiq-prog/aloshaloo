@@ -31,62 +31,40 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    // Free TURN servers for NAT traversal
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
 };
 
-/** Wait for ICE gathering to finish, returns plain { type, sdp } object. */
-function waitForIceComplete(pc: RTCPeerConnection, timeoutMs = 8000): Promise<{ type: string; sdp: string }> {
+/** Wait for ICE gathering — short timeout since TURN resolves fast. */
+function waitForIce(pc: RTCPeerConnection): Promise<{ type: string; sdp: string }> {
   return new Promise((resolve) => {
-    const finish = () => {
-      const ld = pc.localDescription;
-      resolve({ type: ld!.type, sdp: ld!.sdp });
-    };
+    const finish = () => resolve({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp });
     if (pc.iceGatheringState === 'complete') { finish(); return; }
-    const timer = setTimeout(() => { console.log('[ICE] Gathering timed out'); finish(); }, timeoutMs);
+    const timer = setTimeout(finish, 3000); // 3s max
     pc.addEventListener('icegatheringstatechange', () => {
       if (pc.iceGatheringState === 'complete') { clearTimeout(timer); finish(); }
     });
   });
 }
 
-/** Play remote audio imperatively (bypasses React re-render issues). */
-function playRemoteAudio(stream: MediaStream): HTMLAudioElement | null {
-  if (Platform.OS !== 'web') return null;
-  try {
-    const audio = document.createElement('audio');
-    audio.id = 'webrtc-remote-audio';
-    audio.autoplay = true;
-    (audio as any).playsInline = true;
-    audio.srcObject = stream;
-    document.body.appendChild(audio);
-    audio.play().catch(e => console.warn('[Audio] play() rejected:', e));
-    console.log('[Audio] Remote audio element created and playing');
-    return audio;
-  } catch (e) { console.error('[Audio] Failed to create audio element:', e); return null; }
+/** Play remote audio imperatively. */
+function playRemoteAudio(stream: MediaStream) {
+  if (Platform.OS !== 'web') return;
+  stopRemoteAudio();
+  const audio = document.createElement('audio');
+  audio.id = 'webrtc-remote-audio';
+  audio.autoplay = true;
+  (audio as any).playsInline = true;
+  audio.srcObject = stream;
+  document.body.appendChild(audio);
+  audio.play().catch(() => {});
 }
-
 function stopRemoteAudio() {
   if (Platform.OS !== 'web') return;
-  try {
-    const el = document.getElementById('webrtc-remote-audio');
-    if (el) { (el as HTMLAudioElement).srcObject = null; el.remove(); }
-  } catch {}
+  const el = document.getElementById('webrtc-remote-audio') as HTMLAudioElement | null;
+  if (el) { el.srcObject = null; el.remove(); }
 }
 
 export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -103,23 +81,47 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const soundRef = useRef<Audio.Sound | null>(null);
   const currentUidRef = useRef<string | null>(null);
 
-  // ─── Auth & signaling setup ─────────────────────────────────────────
+  // Pre-cached data for fast accept
+  const cachedOfferRef = useRef<{ type: string; sdp: string } | null>(null);
+  const preStreamRef = useRef<MediaStream | null>(null);
+  // Cache my profile so startCall doesn't need to fetch it each time
+  const myProfileRef = useRef<{ name: string; avatar: string | null } | null>(null);
+
+  // ─── Auth & signaling ───────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) { currentUidRef.current = session.user.id; setupSignaling(session.user.id); }
+      if (session) {
+        currentUidRef.current = session.user.id;
+        setupSignaling(session.user.id);
+        // Pre-cache profile
+        cacheMyProfile(session.user.id);
+      }
     };
     init();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_ev, session) => {
-      if (session) { currentUidRef.current = session.user.id; setupSignaling(session.user.id); }
-      else { currentUidRef.current = null; subscriptionRef.current?.unsubscribe(); }
+      if (session) {
+        currentUidRef.current = session.user.id;
+        setupSignaling(session.user.id);
+        cacheMyProfile(session.user.id);
+      } else {
+        currentUidRef.current = null;
+        subscriptionRef.current?.unsubscribe();
+      }
     });
 
     return () => { subscriptionRef.current?.unsubscribe(); stopSound(); authListener.subscription.unsubscribe(); };
   }, []);
 
-  // ─── Sound helpers ──────────────────────────────────────────────────
+  const cacheMyProfile = async (uid: string) => {
+    try {
+      const { data } = await supabase.from('profiles').select('username, avatar_url').eq('id', uid).single();
+      if (data) myProfileRef.current = { name: data.username || 'مستخدم', avatar: data.avatar_url || null };
+    } catch {}
+  };
+
+  // ─── Sound ──────────────────────────────────────────────────────────
   const playSound = async (type: 'calling' | 'ringing') => {
     try {
       if (soundRef.current) await soundRef.current.unloadAsync();
@@ -128,7 +130,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         : 'https://assets.mixkit.co/active_storage/sfx/2591/2591-preview.mp3';
       const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, isLooping: true });
       soundRef.current = sound;
-    } catch (e) { console.log('[Sound] error:', e); }
+    } catch {}
   };
   const stopSound = async () => {
     if (soundRef.current) { try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch {} soundRef.current = null; }
@@ -136,7 +138,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // ─── DB signaling ───────────────────────────────────────────────────
   const setupSignaling = (uid: string) => {
-    console.log('[Sig] Listening for calls for:', uid);
     subscriptionRef.current?.unsubscribe();
 
     subscriptionRef.current = supabase
@@ -145,34 +146,40 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const call = payload.new || payload.old;
         if (!call) return;
 
-        // ── RECEIVER side ──
+        // ── RECEIVER ──
         if (call.receiver_id === uid) {
           if (payload.eventType === 'INSERT') {
-            console.log('[Sig] Incoming call from:', call.caller_name);
             setActiveCallId(call.id);
             setRemoteUserId(call.caller_id);
             setCaller({ id: call.caller_id, username: call.caller_name, avatar: call.caller_avatar });
             setStatus('ringing');
             playSound('ringing');
+
+            // Pre-request microphone while ringing (so accept is instant)
+            navigator.mediaDevices.getUserMedia({ audio: true })
+              .then(s => { preStreamRef.current = s; })
+              .catch(() => {});
+
+            // If offer is already in this INSERT, cache it
+            if (call.offer?.sdp) cachedOfferRef.current = call.offer;
+          }
+          // Cache offer when it arrives via UPDATE
+          if (payload.eventType === 'UPDATE' && call.offer?.sdp && !cachedOfferRef.current) {
+            cachedOfferRef.current = call.offer;
           }
           if (payload.eventType === 'UPDATE' && (call.status === 'ended' || call.status === 'rejected')) cleanupCall();
           if (payload.eventType === 'DELETE') cleanupCall();
         }
 
-        // ── CALLER side ──
+        // ── CALLER ──
         if (call.caller_id === uid) {
           if (payload.eventType === 'UPDATE') {
             if (call.status === 'connected' && call.answer) {
-              console.log('[Sig] Caller: answer received, setting remote desc');
               stopSound();
               setStatus('connected');
               try {
-                if (pcRef.current) {
-                  await pcRef.current.setRemoteDescription({ type: call.answer.type, sdp: call.answer.sdp });
-                  console.log('[Sig] Caller: remote desc SET. connectionState:', pcRef.current.connectionState,
-                    'iceConnectionState:', pcRef.current.iceConnectionState);
-                }
-              } catch (e) { console.error('[Sig] Caller setRemoteDescription error:', e); }
+                if (pcRef.current) await pcRef.current.setRemoteDescription({ type: call.answer.type, sdp: call.answer.sdp });
+              } catch (e) { console.error('[Sig] setRemoteDescription error:', e); }
             }
             if (call.status === 'rejected' || call.status === 'ended') {
               cleanupCall();
@@ -182,13 +189,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (payload.eventType === 'DELETE') cleanupCall();
         }
       })
-      .subscribe((s) => console.log('[Sig] channel status:', s));
+      .subscribe();
   };
 
   // ─── Start call (CALLER) ────────────────────────────────────────────
   const startCall = async (targetUid: string, targetUsername: string, targetAvatar: string | null) => {
     try {
-      console.log('[Call] Starting call to:', targetUsername);
+      // ① Get mic + set UI simultaneously
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
       setRemoteUserId(targetUid);
@@ -196,16 +203,22 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setStatus('calling');
       playSound('calling');
 
-      // Get my info
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const { data: profile } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
-      const myName = profile?.username || user?.user_metadata?.username || 'مستخدم';
-      const myAvatar = profile?.avatar_url || user?.user_metadata?.avatar_url || null;
+      const uid = currentUidRef.current!;
+      const myName = myProfileRef.current?.name || 'مستخدم';
+      const myAvatar = myProfileRef.current?.avatar || null;
 
-      // ① INSERT call row IMMEDIATELY → receiver gets notification instantly
+      // ② Create PeerConnection & start ICE gathering NOW (runs in background)
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+      pc.ontrack = (ev) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // ③ INSERT call into DB immediately (don't wait for ICE!)
+      const icePromise = waitForIce(pc); // runs in parallel
       const { data, error } = await supabase.from('calls').insert([{
-        caller_id: user.id,
+        caller_id: uid,
         receiver_id: targetUid,
         caller_name: myName,
         caller_avatar: myAvatar,
@@ -214,28 +227,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }]).select().single();
       if (error) throw error;
       setActiveCallId(data.id);
-      console.log('[Call] Call row created INSTANTLY:', data.id);
 
-      // ② Create peer connection & gather ICE in parallel
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      pcRef.current = pc;
-      pc.oniceconnectionstatechange = () => console.log('[PC-Caller] iceConnectionState:', pc.iceConnectionState);
-      pc.onconnectionstatechange = () => console.log('[PC-Caller] connectionState:', pc.connectionState);
-      pc.ontrack = (ev) => {
-        console.log('[PC-Caller] ontrack fired');
-        if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
-      };
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      console.log('[Call] Gathering ICE candidates...');
-      const fullOffer = await waitForIceComplete(pc);
-      console.log('[Call] ICE done. Candidates:', (fullOffer.sdp.match(/a=candidate/g) || []).length);
-
-      // ③ UPDATE call row with full offer (ICE candidates embedded)
+      // ④ Wait for ICE to finish, then update offer
+      const fullOffer = await icePromise;
       await supabase.from('calls').update({ offer: fullOffer }).eq('id', data.id);
-      console.log('[Call] Offer updated in DB');
 
     } catch (err) {
       console.error('[Call] startCall error:', err);
@@ -247,45 +242,38 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // ─── Accept call (RECEIVER) ─────────────────────────────────────────
   const acceptCall = async () => {
     try {
-      console.log('[Call] Accepting call:', activeCallId);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // ① Use pre-cached mic stream, or get new one
+      const stream = preStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
+      preStreamRef.current = null;
       setLocalStream(stream);
       setStatus('connected');
       stopSound();
 
-      // Read offer from DB — poll if caller hasn't finished ICE yet
-      let offerData: { type: string; sdp: string } | null = null;
-      for (let i = 0; i < 15; i++) {
-        const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
-        if (call?.offer?.sdp) { offerData = call.offer; break; }
-        console.log('[Call] Offer not ready yet, waiting... attempt', i + 1);
-        await new Promise(r => setTimeout(r, 500));
+      // ② Get offer — use cache first, then poll briefly
+      let offerData = cachedOfferRef.current;
+      if (!offerData) {
+        for (let i = 0; i < 10; i++) {
+          const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
+          if (call?.offer?.sdp) { offerData = call.offer; break; }
+          await new Promise(r => setTimeout(r, 300));
+        }
       }
-      if (!offerData) throw new Error('Offer not available after waiting');
-      console.log('[Call] Got offer. Candidates:', (offerData.sdp.match(/a=candidate/g) || []).length);
+      cachedOfferRef.current = null;
+      if (!offerData) throw new Error('Offer not available');
 
-      // Create peer connection
+      // ③ Create PeerConnection, set offer, create answer
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
-      pc.oniceconnectionstatechange = () => console.log('[PC-Recv] iceConnectionState:', pc.iceConnectionState);
-      pc.onconnectionstatechange = () => console.log('[PC-Recv] connectionState:', pc.connectionState);
-      pc.ontrack = (ev) => {
-        console.log('[PC-Recv] ontrack fired');
-        if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); }
-      };
+      pc.ontrack = (ev) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-      // Set remote description & create answer
       await pc.setRemoteDescription({ type: offerData.type, sdp: offerData.sdp });
-      console.log('[Call] Receiver: remote description set');
-
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      const fullAnswer = await waitForIceComplete(pc);
-      console.log('[Call] Answer ICE done. Candidates:', (fullAnswer.sdp.match(/a=candidate/g) || []).length);
+      const fullAnswer = await waitForIce(pc);
 
+      // ④ Save answer
       await supabase.from('calls').update({ status: 'connected', answer: fullAnswer }).eq('id', activeCallId);
-      console.log('[Call] Answer saved to DB');
 
     } catch (err) {
       console.error('[Call] acceptCall error:', err);
@@ -293,7 +281,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // ─── Reject / End ───────────────────────────────────────────────────
+  // ─── Reject / End / Cleanup ─────────────────────────────────────────
   const rejectCall = async () => {
     if (activeCallId) await supabase.from('calls').update({ status: 'rejected' }).eq('id', activeCallId);
     cleanupCall();
@@ -312,11 +300,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     stopSound();
     stopRemoteAudio();
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); setLocalStream(null); }
+    // Also stop pre-cached stream
+    if (preStreamRef.current) { preStreamRef.current.getTracks().forEach(t => t.stop()); preStreamRef.current = null; }
     setRemoteStream(null);
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+    cachedOfferRef.current = null;
   };
 
-  // ─── Mute ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (localStream) localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted; });
   }, [isMuted, localStream]);
