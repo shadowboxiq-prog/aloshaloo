@@ -22,8 +22,31 @@ export const useFileTransfer = () => {
 };
 
 const ICE_SERVERS = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }]
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' }, 
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+  ]
 };
+
+function waitForIce(pc: RTCPeerConnection): Promise<{ type: string; sdp: string }> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      if (pc.localDescription) {
+        resolve({ type: pc.localDescription.type, sdp: pc.localDescription.sdp });
+      }
+    };
+    if (pc.iceGatheringState === 'complete') { finish(); return; }
+    const timer = setTimeout(finish, 3000); 
+    pc.addEventListener('icegatheringstatechange', () => {
+      if (pc.iceGatheringState === 'complete') { 
+        clearTimeout(timer); 
+        finish(); 
+      }
+    });
+  });
+}
 
 export const FileTransferProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [transferStatus, setTransferStatus] = useState<any>('idle');
@@ -104,13 +127,16 @@ export const FileTransferProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      
+      console.log('[P2P] Gathering ICE for offer...');
+      const fullOffer = await waitForIce(pc);
 
       const { data, error } = await supabase.from('p2p_transfers').insert([{
         sender_id: currentUidRef.current,
         receiver_id: receiverId,
         file_name: fileName,
         file_size: fileSize,
-        offer: offer,
+        offer: fullOffer,
         status: 'requested'
       }]).select().single();
 
@@ -150,8 +176,11 @@ export const FileTransferProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
+      console.log('[P2P] Gathering ICE for answer...');
+      const fullAnswer = await waitForIce(pc);
+
       await supabase.from('p2p_transfers').update({
-        answer,
+        answer: fullAnswer,
         status: 'accepted'
       }).eq('id', transferId);
 
