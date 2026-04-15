@@ -1,6 +1,7 @@
 export default ({ config }) => {
   // Use /aloshaloo/ for production builds (GitHub Pages) and / for local development
   const isProduction = process.env.NODE_ENV === 'production';
+  // Always use the subdirectory for web production builds
   const baseUrl = isProduction ? '/aloshaloo/' : '/';
 
   return {
@@ -35,7 +36,7 @@ export default ({ config }) => {
       output: "static",
       bundler: "metro",
       favicon: "./assets/images/favicon.png",
-      baseUrl: baseUrl
+      baseUrl: "/aloshaloo/"
     },
     plugins: [
       "expo-router",
@@ -52,7 +53,8 @@ export default ({ config }) => {
     ],
     experiments: {
       typedRoutes: true,
-      reactCompiler: false
+      reactCompiler: false,
+      baseUrl: "/aloshaloo/"
     }
   };
 };
