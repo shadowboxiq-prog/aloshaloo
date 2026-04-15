@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 const CHUNK_SIZE = 64 * 1024; // 64KB per chunk for optimal RTC stability
