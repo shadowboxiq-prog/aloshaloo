@@ -13,6 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { formatLastSeenArabic } from '../../lib/date-utils';
 import * as DocumentPicker from 'expo-document-picker';
 import { useCall } from '../../context/CallProvider';
+import { useFileTransfer } from '../../context/FileTransferProvider';
+import { FileTransferOverlay } from '../../components/FileTransferOverlay';
 import { TypingIndicator } from '../../components/TypingIndicator';
 import { usePresence } from '../../context/PresenceProvider';
 
@@ -67,6 +69,7 @@ export default function ChatScreen() {
   const [playingSoundId, setPlayingSoundId] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const { startCall } = useCall();
+  const { requestTransfer } = useFileTransfer();
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -431,6 +434,22 @@ export default function ChatScreen() {
     }
   };
 
+  const pickP2PFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*', // Accept all files for P2P
+      });
+
+      if (!result.canceled) {
+        const asset = result.assets[0];
+        requestTransfer(id as string, asset.uri, asset.name, asset.size || 0);
+        setShowAttachmentMenu(false);
+      }
+    } catch (err) {
+      Alert.alert('خطأ', 'فشل في اختيار الملف للنقل المباشر');
+    }
+  };
+
   const uploadAndSendFile = async (uri: string, name: string, mimeType: string) => {
     setIsSending(true);
     try {
@@ -696,6 +715,13 @@ export default function ChatScreen() {
                 </View>
                 <Text style={styles.menuText}>مستند / PDF</Text>
               </TouchableOpacity>
+
+              <TouchableOpacity style={styles.menuItem} onPress={pickP2PFile}>
+                <View style={[styles.menuIcon, { backgroundColor: '#ff6d00' }]}>
+                  <Ionicons name="flash" size={24} color={Colors.white} />
+                </View>
+                <Text style={styles.menuText}>إرسال ملف مباشر (P2P)</Text>
+              </TouchableOpacity>
             </BlurView>
           )}
 
@@ -769,6 +795,7 @@ export default function ChatScreen() {
           </View>
         </BlurView>
       </Modal>
+      <FileTransferOverlay />
     </View>
   );
 }
