@@ -14,6 +14,7 @@ import { formatLastSeenArabic } from '../../lib/date-utils';
 import * as DocumentPicker from 'expo-document-picker';
 import { useCall } from '../../context/CallProvider';
 import { TypingIndicator } from '../../components/TypingIndicator';
+import { usePresence } from '../../context/PresenceProvider';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -32,11 +33,11 @@ export default function ChatScreen() {
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [friendStatus, setFriendStatus] = useState<string>('جاري التحقق...');
+  const [friendStatus, setFriendStatus] = useState<any>(null);
   const [friendAvatar, setFriendAvatar] = useState<string | null>(null);
+  const { onlineUsers } = usePresence();
   const [isTyping, setIsTyping] = useState(false);
   const [otherIsTyping, setOtherIsTyping] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   
   // Media Preview State
   const [selectedMedia, setSelectedMedia] = useState<MediaItem[]>([]);
@@ -49,18 +50,19 @@ export default function ChatScreen() {
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<any>(null);
+  const otherTypingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
   
   // Audio state
   const [isRecordingUI, setIsRecordingUI] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingIntervalRef = useRef<any>(null);
   
   // Audio Refs
   const currentRecordingRef = useRef<Audio.Recording | null>(null);
-  const currentWebRecorderRef = useRef<MediaRecorder | null>(null);
-  const webChunksRef = useRef<Blob[]>([]);
+  const currentWebRecorderRef = useRef<any>(null);
+  const webChunksRef = useRef<any[]>([]);
   
   const [playingSoundId, setPlayingSoundId] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -86,6 +88,7 @@ export default function ChatScreen() {
 
       await fetchMessages(uid, id as string);
       await fetchProfiles(id as string);
+      await fetchFriendStatus();
       
       setupSubscription(uid);
     }
@@ -108,7 +111,12 @@ export default function ChatScreen() {
                   if (exists) return prev;
                   return [...prev.filter(m => !(m.isOptimistic && m.content === newMsg.content)), newMsg];
                 });
-                if (newMsg.sender_id === id) markMessagesAsRead(uid, id as string);
+                if (newMsg.sender_id === id) {
+                  markMessagesAsRead(uid, id as string);
+                  // Clear typing indicator when message arrives from the other person
+                  setOtherIsTyping(false);
+                  if (otherTypingTimeoutRef.current) clearTimeout(otherTypingTimeoutRef.current);
+                }
               }
             } else if (payload.eventType === 'UPDATE') {
               const updatedMsg = payload.new;
@@ -124,6 +132,25 @@ export default function ChatScreen() {
             presence.some((p: any) => p.user_id === id && p.is_typing)
           );
           setOtherIsTyping(typing);
+          if (otherTypingTimeoutRef.current) clearTimeout(otherTypingTimeoutRef.current);
+          if (typing) {
+            otherTypingTimeoutRef.current = setTimeout(() => {
+              if (isMounted) setOtherIsTyping(false);
+            }, 5000);
+          }
+          
+          // No need to update onlineUsers here, it comes from global context
+        })
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          if (!isMounted || payload.user_id !== id) return;
+          setOtherIsTyping(payload.is_typing);
+          
+          if (otherTypingTimeoutRef.current) clearTimeout(otherTypingTimeoutRef.current);
+          if (payload.is_typing) {
+            otherTypingTimeoutRef.current = setTimeout(() => {
+              if (isMounted) setOtherIsTyping(false);
+            }, 5000);
+          }
         })
         .subscribe(async (status: any) => {
           if (status === 'SUBSCRIBED') {
@@ -140,14 +167,10 @@ export default function ChatScreen() {
     }
 
     initChat();
-    fetchFriendStatus();
-    
-    // Background/Foreground re-sync
-    const appStateListener = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && currentUserId && isMounted) {
-        fetchMessages(currentUserId, id as string);
-        fetchFriendStatus();
-        setupSubscription(currentUserId);
+
+    const appStateListener = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && isMounted) {
+        initChat();
       }
     });
 
@@ -156,6 +179,8 @@ export default function ChatScreen() {
        appStateListener.remove();
        if (channelRef.current) supabase.removeChannel(channelRef.current);
        if (soundRef.current) soundRef.current.unloadAsync();
+       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+       if (otherTypingTimeoutRef.current) clearTimeout(otherTypingTimeoutRef.current);
        if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
        if (currentRecordingRef.current) currentRecordingRef.current.stopAndUnloadAsync();
     };
@@ -185,11 +210,23 @@ export default function ChatScreen() {
     if (!isTyping && channelRef.current) {
       setIsTyping(true);
       channelRef.current.track({ user_id: currentUserId, is_typing: true });
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { user_id: currentUserId, is_typing: true }
+      });
     }
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
-      if (channelRef.current) channelRef.current.track({ user_id: currentUserId, is_typing: false });
+      if (channelRef.current) {
+        channelRef.current.track({ user_id: currentUserId, is_typing: false });
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { user_id: currentUserId, is_typing: false }
+        });
+      }
     }, 2000);
   };
 
@@ -238,24 +275,24 @@ export default function ChatScreen() {
 
   const startRecording = async () => {
     try {
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           Alert.alert('خطأ في المتصفح', 'المتصفح يحظر الوصول للميكروفون في الروابط غير المشفرة (HTTP). يرجى تجربة الميزة من خلال الرابط العام (HTTPS) أو من خلال localhost.');
           return;
         }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
+        const mediaRecorder = new (typeof window !== 'undefined' ? (window as any).MediaRecorder : null)(stream);
         webChunksRef.current = [];
-        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) webChunksRef.current.push(e.data); };
+        mediaRecorder.ondataavailable = (e: any) => { if (e.data.size > 0) webChunksRef.current.push(e.data); };
         mediaRecorder.onstop = () => {
           if (webChunksRef.current.length > 0) {
-            const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
+            const blob = new (typeof window !== 'undefined' ? (window as any).Blob : null)(webChunksRef.current, { type: 'audio/webm' });
             uploadAndSendAudio(undefined, blob);
           }
         };
         currentWebRecorderRef.current = mediaRecorder;
         mediaRecorder.start(500);
-      } else {
+      } else if (Platform.OS !== 'web') {
         const { status } = await Audio.requestPermissionsAsync();
         if (status !== 'granted') return;
         await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
@@ -540,7 +577,11 @@ export default function ChatScreen() {
   return (
     <View style={styles.container}>
       {renderCustomHeader()}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
         <FlatList
           ref={flatListRef}
           data={messages}

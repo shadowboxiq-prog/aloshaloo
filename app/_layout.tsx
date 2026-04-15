@@ -10,6 +10,7 @@ import { Colors } from '../constants/theme';
 import { CallProvider } from '../context/CallProvider';
 import { VoiceCallModal } from '../components/VoiceCallModal';
 import { NotificationProvider } from '../context/NotificationProvider';
+import { PresenceProvider } from '../context/PresenceProvider';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -77,74 +78,21 @@ export default function RootLayout() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!session?.user?.id) return;
-
-    const channel = supabase.channel('online-users', {
-      config: {
-        presence: {
-          key: session.user.id,
-        },
-      },
-    });
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const ids = Object.keys(state);
-        // Custom event for other components (Web only)
-        if (Platform.OS === 'web' && typeof CustomEvent !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('presence-sync', { detail: { ids } }));
-        }
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({
-            id: session.user.id,
-            online_at: new Date().toISOString(),
-          });
-        }
-      });
-
-    // Heartbeat to update last_seen in DB
-    const updateLastSeen = async () => {
-      await supabase
-        .from('profiles')
-        .update({ last_seen: new Date().toISOString() })
-        .eq('id', session.user.id);
-    };
-
-    updateLastSeen(); // initial update
-    const heartbeat = setInterval(updateLastSeen, 1000 * 60 * 2); // every 2 mins
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(heartbeat);
-    };
-  }, [session?.user?.id]);
 
   useEffect(() => {
-    if (!initialized) return;
+    if (!initialized || !loaded) return;
 
     const inAuthGroup = segments[0] === 'auth';
+
+    console.log('[Auth Guard] Session:', !!session, 'Path:', segments[0]);
 
     if (!session && !inAuthGroup) {
       router.replace('/auth');
     } else if (session && inAuthGroup) {
       router.replace('/');
     }
+  }, [session, initialized, loaded, segments]);
 
-    let interval: NodeJS.Timeout;
-    if (session) {
-      const updateLastSeen = async () => {
-        await supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', session.user.id);
-      };
-      updateLastSeen();
-      interval = setInterval(updateLastSeen, 60000);
-    }
-
-    return () => { if (interval) clearInterval(interval); }
-  }, [session, initialized, segments]);
 
   if (!initialized || !loaded) {
     return (
@@ -158,15 +106,17 @@ export default function RootLayout() {
   return (
     <CallProvider>
       <NotificationProvider>
-        <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
-          <Stack.Screen name="index" options={{ title: 'Home' }} />
-          <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
-          <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
-          <Stack.Screen name="profile" options={{ title: 'Profile' }} />
-          <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-          <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
-        </Stack>
-        <VoiceCallModal />
+        <PresenceProvider>
+          <Stack screenOptions={{ headerShown: false, animation: 'fade_from_bottom' }}>
+            <Stack.Screen name="index" options={{ title: 'Home' }} />
+            <Stack.Screen name="auth" options={{ title: 'Welcome' }} />
+            <Stack.Screen name="chat/[id]" options={{ title: 'Chat' }} />
+            <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+            <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+            <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
+          </Stack>
+          <VoiceCallModal />
+        </PresenceProvider>
       </NotificationProvider>
     </CallProvider>
   );

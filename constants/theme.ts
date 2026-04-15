@@ -27,12 +27,25 @@ export const Colors = {
   black: '#38274c', // We don't use pure black
   glassBg: 'rgba(253, 243, 255, 0.7)',
   readReceipt: '#4fc3f7',
+  // Stubs for shared components
+  light: {
+    primary: '#6a1cf6',
+    background: '#fdf3ff',
+    text: '#38274c',
+    icon: '#67537c',
+  },
+  dark: {
+    primary: '#ac8eff',
+    background: '#1a0b2e',
+    text: '#f7f0ff',
+    icon: '#836e99',
+  }
 };
 
 export const Gradients = {
-  primary: ['#6a1cf6', '#ac8eff'],
-  secondary: ['#4af8e3', '#00675d'], 
-  pulse: ['#6a1cf6', '#4af8e3', '#b70047'], // Multi-stop for stories
+  primary: ['#6a1cf6', '#ac8eff'] as const,
+  secondary: ['#4af8e3', '#00675d'] as const, 
+  pulse: ['#6a1cf6', '#4af8e3', '#b70047'] as const, // Multi-stop for stories
 };
 
 export const Spacing = {

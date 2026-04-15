@@ -93,13 +93,13 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           } catch {}
 
           // Fetch sender profile info
-          const { data: profile } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', msg.sender_id).single();
+          const { data: profile } = await supabase.from('profiles').select('username, avatar_url').eq('id', msg.sender_id).single();
           
           if (profile) {
             setActiveToast({
               id: msg.id,
               sender_id: msg.sender_id,
-              sender_name: profile.full_name,
+              sender_name: profile.username,
               sender_avatar: profile.avatar_url,
               content: msg.message_type === 'image' ? '🖼️ صورة' : msg.message_type === 'audio' ? '🎵 بصمة صوتية' : msg.message_type === 'video' ? '📽️ فيديو' : msg.message_type === 'file' ? '📄 ملف' : msg.content
             });

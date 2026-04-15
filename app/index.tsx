@@ -10,6 +10,7 @@ import { Image } from 'expo-image';
 import { formatLastSeenArabic } from '../lib/date-utils';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, ResizeMode } from 'expo-av';
+import { usePresence } from '../context/PresenceProvider';
 
 export default function HomeScreen() {
   const [chats, setChats] = useState<any[]>([]);
@@ -17,10 +18,11 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [pendingCount, setPendingCount] = useState(0);
-  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const { onlineUsers } = usePresence();
   const [stories, setStories] = useState<any[]>([]);
   const [viewingStory, setViewingStory] = useState<{userIndex: number, storyIndex: number} | null>(null);
   const [isUploadingStory, setIsUploadingStory] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -31,10 +33,10 @@ export default function HomeScreen() {
     if (!currentUser) return;
 
     let isMounted = true;
-    const channelId = `user-activity-${currentUser.id}`;
     
+    // Listen for friends status changes and chat updates
     const channel = supabase
-      .channel(channelId)
+      .channel(`home_updates_${currentUser.id}`)
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
@@ -43,19 +45,14 @@ export default function HomeScreen() {
       }, () => {
         if (isMounted) fetchPendingCount(currentUser.id);
       })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
         table: 'chats'
       }, () => {
         if (isMounted) fetchChats(currentUser.id);
       })
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-           console.log('Home Subscription Status:', status);
-           if (isMounted) fetchChats(currentUser.id);
-        }
-      });
+      .subscribe();
 
     const appStateListener = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active' && isMounted) {
@@ -74,19 +71,45 @@ export default function HomeScreen() {
   }, [currentUser]);
 
   const fetchInitialData = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      router.replace('/auth');
-      return;
+    try {
+      setInitError(null);
+      setLoading(true);
+      console.log('[Home] Starting initialization...');
+
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) throw sessionError;
+      
+      if (!session) {
+        console.log('[Home] No session found, redirecting to auth');
+        router.replace('/auth');
+        return;
+      }
+
+      console.log('[Home] Session valid for:', session.user.id);
+      setCurrentUser(session.user);
+
+      // We use Promise.allSettled to ensure that even if one part fails, others might succeed
+      // and we definitely hit the 'finally' or next step.
+      const results = await Promise.allSettled([
+        fetchChats(session.user.id), 
+        fetchFriends(session.user.id),
+        fetchPendingCount(session.user.id),
+        fetchStories()
+      ]);
+
+      const failures = results.filter(r => r.status === 'rejected');
+      if (failures.length > 0) {
+        console.warn('[Home] Some background fetches failed:', failures);
+      }
+
+      console.log('[Home] Initialization complete');
+    } catch (err: any) {
+      console.error('[Home] Initialization failed:', err);
+      setInitError(err.message || 'فشل تحميل البيانات الأساسية');
+    } finally {
+      setLoading(false);
     }
-    setCurrentUser(session.user);
-    await Promise.all([
-      fetchChats(session.user.id), 
-      fetchFriends(session.user.id),
-      fetchPendingCount(session.user.id),
-      fetchStories()
-    ]);
-    setLoading(false);
   };
 
   const fetchPendingCount = async (userId: string) => {
@@ -170,9 +193,9 @@ export default function HomeScreen() {
 
       if (!result.canceled) {
         const asset = result.assets[0];
-        const caption = Platform.OS === 'web' 
+        const caption = (Platform.OS === 'web' && typeof window !== 'undefined')
           ? window.prompt('اكتب تعليقاً لقصتك (اختياري)...') 
-          : ''; // Native prompt could be added here if needed
+          : ''; 
 
         setIsUploadingStory(true);
         const formData = new FormData();
@@ -256,34 +279,6 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  const renderBentoDiscovery = () => (
-    <View style={styles.bentoContainer}>
-       <View style={styles.bentoHeader}>
-          <Text style={styles.bentoTitle}>اكتشف عالمك</Text>
-          <TouchableOpacity>
-             <Text style={styles.bentoMore}>الكل</Text>
-          </TouchableOpacity>
-       </View>
-       <View style={styles.bentoGrid}>
-          <TouchableOpacity style={[styles.bentoBox, styles.bentoLarge]}>
-             <LinearGradient colors={Gradients.primary} style={styles.bentoGradient}>
-                <Ionicons name="sparkles" size={32} color={Colors.white} />
-                <Text style={styles.bentoBoxText}>اعثر على أصدقاء جدد</Text>
-             </LinearGradient>
-          </TouchableOpacity>
-          <View style={styles.bentoCol}>
-             <TouchableOpacity style={[styles.bentoBox, styles.bentoSmall, { backgroundColor: Colors.secondaryContainer }]}>
-                <Ionicons name="videocam" size={24} color={Colors.onSecondaryContainer} />
-                <Text style={[styles.bentoBoxTextSm, { color: Colors.onSecondaryContainer }]}>مكالمة سريعة</Text>
-             </TouchableOpacity>
-             <TouchableOpacity style={[styles.bentoBox, styles.bentoSmall, { backgroundColor: Colors.surfaceContainerHighest }]}>
-                <Ionicons name="images" size={24} color={Colors.primary} />
-                <Text style={[styles.bentoBoxTextSm, { color: Colors.primary }]}>المعرض</Text>
-             </TouchableOpacity>
-          </View>
-       </View>
-    </View>
-  );
 
   const isOnline = (lastSeen: string) => {
     if (!lastSeen) return false;
@@ -304,7 +299,7 @@ export default function HomeScreen() {
           styles.chatItem, 
           index % 2 === 0 ? { backgroundColor: Colors.surfaceContainerLow } : { backgroundColor: Colors.surfaceContainerLowest }
         ]} 
-        onPress={() => router.push({ pathname: `/chat/${peer.id}`, params: { username: peer.username } })}
+        onPress={() => router.push({ pathname: `/chat/${peer.id}` as any, params: { username: peer.username } })}
       >
         <View style={styles.chatAvatarWrap}>
            <View style={[styles.squircleAvatarMd, { backgroundColor: Colors.primaryContainer }]}>
@@ -334,8 +329,25 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: 20, color: Colors.onSurfaceVariant, fontFamily: 'Outfit-Medium' }}>جاري التحميل...</Text>
+      </View>
+    );
+  }
+
+  if (initError) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 30 }]}>
+        <Ionicons name="warning-outline" size={64} color={Colors.error} />
+        <Text style={{ fontSize: 20, color: Colors.onSurface, marginTop: 20, fontWeight: '800', textAlign: 'center' }}>حدث خطأ أثناء الاتصال</Text>
+        <Text style={{ color: Colors.onSurfaceVariant, marginTop: 10, textAlign: 'center', marginBottom: 20 }}>{initError}</Text>
+        <TouchableOpacity 
+          style={{ backgroundColor: Colors.primary, paddingHorizontal: 30, paddingVertical: 12, borderRadius: Radius.lg }}
+          onPress={fetchInitialData}
+        >
+          <Text style={{ color: 'white', fontWeight: 'bold' }}>إعادة المحاولة</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -367,8 +379,6 @@ export default function HomeScreen() {
             )}
           />
         </View>
-
-        {renderBentoDiscovery()}
 
         <View style={styles.chatsSection}>
           <Text style={styles.sectionTitle}>المحادثات</Text>
@@ -573,18 +583,6 @@ const styles = StyleSheet.create({
   avatarInitial: { fontSize: 24, fontWeight: 'bold', color: Colors.primary },
   storyName: { fontSize: 12, color: Colors.onSurface, fontWeight: '600' },
 
-  bentoContainer: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.xl },
-  bentoHeader: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  bentoTitle: { fontSize: 18, fontWeight: '800', color: Colors.onSurface },
-  bentoMore: { fontSize: 14, color: Colors.primary, fontWeight: '700' },
-  bentoGrid: { flexDirection: 'row-reverse', gap: 12 },
-  bentoLarge: { flex: 1.5, height: 160 },
-  bentoCol: { flex: 1, gap: 12 },
-  bentoSmall: { flex: 1, height: 74 },
-  bentoBox: { borderRadius: Radius.lg, overflow: 'hidden', ...Shadow.ambient },
-  bentoGradient: { flex: 1, padding: 16, justifyContent: 'flex-end' },
-  bentoBoxText: { color: Colors.white, fontSize: 16, fontWeight: '800', marginTop: 8 },
-  bentoBoxTextSm: { fontSize: 13, fontWeight: '700', padding: 10, textAlign: 'right' },
 
   chatsSection: { paddingHorizontal: Spacing.lg },
   sectionTitle: { fontSize: 20, fontWeight: '800', color: Colors.onSurface, marginBottom: 16, textAlign: 'right' },
@@ -597,6 +595,7 @@ const styles = StyleSheet.create({
   chatHeaderRow: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   peerName: { fontSize: 17, fontWeight: '700', color: Colors.onSurface },
   chatTime: { fontSize: 12, color: Colors.onSurfaceVariant },
+  chatStatus: { marginTop: 2 },
   lastMsg: { fontSize: 14, color: Colors.onSurfaceVariant, textAlign: 'right' },
 
   emptyContainer: { alignItems: 'center', paddingVertical: 60 },

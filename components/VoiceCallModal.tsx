@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Radius, Spacing, Shadow, Gradients } from '../constants/theme';
 import { useCall } from '../context/CallProvider';
 import { LinearGradient } from 'expo-linear-gradient';
+import { RTCView } from '../lib/webrtc';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -28,7 +29,7 @@ export const VoiceCallModal: React.FC = () => {
   }, [remoteStream, status]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: any;
     if (status === 'connected') {
       interval = setInterval(() => setTimer((t) => t + 1), 1000);
     } else {
@@ -50,7 +51,7 @@ export const VoiceCallModal: React.FC = () => {
   const isConnected = status === 'connected';
 
   return (
-    <Modal visible={status !== 'idle'} transparent animationType="slide">
+    <Modal visible={true} transparent animationType="slide">
       <BlurView intensity={100} tint="dark" style={styles.container}>
         <LinearGradient
           colors={['rgba(106, 28, 246, 0.3)', 'transparent']}
@@ -89,26 +90,34 @@ export const VoiceCallModal: React.FC = () => {
           </View>
 
           {/* Video Streams rendering */}
-          {isVideoCall && Platform.OS === 'web' && isConnected && (
+          {isVideoCall && isConnected && (
             <View style={StyleSheet.absoluteFill}>
-              {Platform.OS === 'web' && React.createElement('video', {
-                ref: remoteVideoRef,
-                autoPlay: true,
-                playsInline: true,
-                style: { width: '100%', height: '100%', objectFit: 'cover' }
-              })}
+              {Platform.OS === 'web' ? (
+                React.createElement('video', {
+                  ref: remoteVideoRef,
+                  autoPlay: true,
+                  playsInline: true,
+                  style: { width: '100%', height: '100%', objectFit: 'cover' }
+                })
+              ) : (
+                remoteStream && <RTCView streamURL={(remoteStream as any).toURL()} style={{ flex: 1 }} objectFit="cover" />
+              )}
             </View>
           )}
 
-          {isVideoCall && Platform.OS === 'web' && (
+          {isVideoCall && (
             <View style={styles.pipContainer}>
-              {Platform.OS === 'web' && React.createElement('video', {
-                ref: localVideoRef,
-                autoPlay: true,
-                playsInline: true,
-                muted: true,
-                style: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }
-              })}
+              {Platform.OS === 'web' ? (
+                React.createElement('video', {
+                  ref: localVideoRef,
+                  autoPlay: true,
+                  playsInline: true,
+                  muted: true,
+                  style: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }
+                })
+              ) : (
+                localStream && <RTCView streamURL={(localStream as any).toURL()} style={{ flex: 1 }} objectFit="cover" />
+              )}
             </View>
           )}
 
@@ -149,10 +158,15 @@ export const VoiceCallModal: React.FC = () => {
                    <Text style={styles.btnLabel}>الكاميرا</Text>
                 </TouchableOpacity>
               )}
-              {isConnected && !isVideoCall && (
-                <TouchableOpacity style={styles.smallBtn}>
-                   <Ionicons name="volume-high" size={24} color={Colors.white} />
-                   <Text style={styles.btnLabel}>مكبر</Text>
+              {isConnected && (
+                <TouchableOpacity 
+                   style={styles.smallBtn} 
+                   onPress={() => {
+                     import('expo-router').then(({ router }) => router.push('/watch-party'));
+                   }}
+                >
+                   <Ionicons name="tv-outline" size={24} color={Colors.white} />
+                   <Text style={styles.btnLabel}>مشاهدة</Text>
                 </TouchableOpacity>
               )}
             </View>

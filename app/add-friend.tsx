@@ -46,15 +46,17 @@ export default function AddFriendScreen() {
   useEffect(() => {
     if (!currentUserId) return;
     
-    const handleSync = (e: any) => {
-      setOnlineUsers(new Set(e.detail.ids));
-    };
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleSync = (e: any) => {
+        setOnlineUsers(new Set(e.detail.ids));
+      };
 
-    window.addEventListener('presence-sync', handleSync);
+      window.addEventListener('presence-sync', handleSync);
 
-    return () => {
-      window.removeEventListener('presence-sync', handleSync);
-    };
+      return () => {
+        window.removeEventListener('presence-sync', handleSync);
+      };
+    }
   }, [currentUserId]);
 
   const fetchMyFriends = async (userId: string) => {
@@ -76,7 +78,7 @@ export default function AddFriendScreen() {
         return { ...profile, friendship_id: f.id };
       });
       setAcceptedFriends(friendsList);
-      setMyFriendIds(friendsList.map(f => f.id));
+      setMyFriendIds(friendsList.map(f => (f as any).id));
     }
   };
 
@@ -183,7 +185,7 @@ export default function AddFriendScreen() {
     // In this app, the chat screen uses the friend's profile ID as the 'id' parameter.
     // There is no separate 'chats' table; it simply queries messages between users.
     router.push({
-      pathname: '/chat/' + friendId,
+      pathname: `/chat/${friendId}` as any,
       params: { username: username }
     });
   };

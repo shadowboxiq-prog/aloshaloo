@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { Platform, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { Audio } from 'expo-av';
+import { RTCPeerConnection, mediaDevices, RTCSessionDescription, RTCIceCandidate } from '../lib/webrtc';
 
 type CallStatus = 'idle' | 'calling' | 'ringing' | 'connected';
 
@@ -19,6 +20,9 @@ interface CallContextType {
   setIsMuted: (muted: boolean) => void;
   isVideoCall: boolean;
   toggleCamera: () => void;
+  isHost: boolean;
+  sendVideoSyncCommand: (command: { action: 'PLAY' | 'PAUSE' | 'SEEK', time: number, videoId?: string }) => void;
+  lastCommand: { action: 'PLAY' | 'PAUSE' | 'SEEK', time: number, videoId?: string } | null;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -44,7 +48,7 @@ function waitForIce(pc: RTCPeerConnection): Promise<{ type: string; sdp: string 
   return new Promise((resolve) => {
     const finish = () => resolve({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp });
     if (pc.iceGatheringState === 'complete') { finish(); return; }
-    const timer = setTimeout(finish, 3000); // 3s max
+    const timer: any = setTimeout(finish, 3000); // 3s max
     pc.addEventListener('icegatheringstatechange', () => {
       if (pc.iceGatheringState === 'complete') { clearTimeout(timer); finish(); }
     });
@@ -53,7 +57,7 @@ function waitForIce(pc: RTCPeerConnection): Promise<{ type: string; sdp: string 
 
 /** Play remote audio imperatively. */
 function playRemoteAudio(stream: MediaStream) {
-  if (Platform.OS !== 'web') return;
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return;
   stopRemoteAudio();
   const audio = document.createElement('audio');
   audio.id = 'webrtc-remote-audio';
@@ -64,7 +68,7 @@ function playRemoteAudio(stream: MediaStream) {
   audio.play().catch(() => {});
 }
 function stopRemoteAudio() {
-  if (Platform.OS !== 'web') return;
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return;
   const el = document.getElementById('webrtc-remote-audio') as HTMLAudioElement | null;
   if (el) { el.srcObject = null; el.remove(); }
 }
@@ -78,11 +82,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoCall, setIsVideoCall] = useState(false);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const [lastCommand, setLastCommand] = useState<{ action: 'PLAY' | 'PAUSE' | 'SEEK', time: number, videoId?: string } | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const subscriptionRef = useRef<any>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const currentUidRef = useRef<string | null>(null);
+  const dataChannelRef = useRef<any>(null);
 
   // Pre-cached data for fast accept
   const cachedOfferRef = useRef<{ type: string; sdp: string } | null>(null);
@@ -159,9 +166,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             playSound('ringing');
 
             // Pre-request microphone (and camera if video) while ringing (so accept is instant)
-            navigator.mediaDevices.getUserMedia({ audio: true, video: !!call.is_video })
-              .then(s => { preStreamRef.current = s; })
-              .catch(() => {});
+            if (mediaDevices?.getUserMedia) {
+              mediaDevices.getUserMedia({ audio: true, video: !!call.is_video })
+                .then((s: any) => { preStreamRef.current = s; })
+                .catch((err: any) => { console.warn('[Call] Pre-stream getUserMedia failed:', err); });
+            } else {
+              console.warn('[Call] mediaDevices.getUserMedia is not available');
+            }
 
             // If offer is already in this INSERT, cache it
             if (call.offer?.sdp) cachedOfferRef.current = call.offer;
@@ -181,7 +192,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               stopSound();
               setStatus('connected');
               try {
-                if (pcRef.current) await pcRef.current.setRemoteDescription({ type: call.answer.type, sdp: call.answer.sdp });
+                if (pcRef.current) {
+                  console.log('[Sig] Setting remote description (answer)');
+                  await pcRef.current.setRemoteDescription(new RTCSessionDescription({ type: call.answer.type, sdp: call.answer.sdp }));
+                }
               } catch (e) { console.error('[Sig] setRemoteDescription error:', e); }
             }
             if (call.status === 'rejected' || call.status === 'ended') {
@@ -198,8 +212,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // ─── Start call (CALLER) ────────────────────────────────────────────
   const startCall = async (targetUid: string, targetUsername: string, targetAvatar: string | null, isVideo = false) => {
     try {
+      if (!mediaDevices?.getUserMedia) {
+        throw new Error('الكاميرا أو الميكروفون غير متاحين. يرجى التأكد من استخدام اتصال آمن (HTTPS) أو تطبيق الموبايل.');
+      }
       // ① Get mic/cam + set UI simultaneously
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      const stream = await mediaDevices.getUserMedia({ audio: true, video: isVideo });
       setLocalStream(stream);
       setRemoteUserId(targetUid);
       setCaller({ id: targetUid, username: targetUsername, avatar: targetAvatar });
@@ -214,10 +231,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // ② Create PeerConnection & start ICE gathering NOW (runs in background)
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
-      pc.ontrack = (ev) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      pc.ontrack = (ev: any) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
+      stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+
+      // --- DATA CHANNEL SETUP (Host) ---
+      const dc = pc.createDataChannel('video-sync');
+      dataChannelRef.current = dc;
+      setupDataChannelListeners(dc);
+      setIsHost(true);
 
       // ③ INSERT call into DB immediately (don't wait for ICE!)
       const icePromise = waitForIce(pc); // runs in parallel
@@ -244,11 +267,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // ─── Accept call (RECEIVER) ─────────────────────────────────────────
   const acceptCall = async () => {
     try {
+      if (!mediaDevices?.getUserMedia) {
+        throw new Error('الكاميرا أو الميكروفون غير متاحين. إذا كنت تستخدم المتصفح، يرجى استخدام HTTPS أو تطبيق الموبايل.');
+      }
       // ① Use pre-cached mic stream, or get new one
-      const stream = preStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
+      const stream = preStreamRef.current || await mediaDevices.getUserMedia({ audio: true, video: isVideoCall });
       preStreamRef.current = null;
       setLocalStream(stream);
       setStatus('connected');
@@ -257,31 +282,57 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // ② Get offer — use cache first, then poll briefly
       let offerData = cachedOfferRef.current;
       if (!offerData) {
-        for (let i = 0; i < 10; i++) {
-          const { data: call } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
-          if (call?.offer?.sdp) { offerData = call.offer; break; }
+        if (!activeCallId) throw new Error('No active call found to accept');
+        console.log(`[Call] Polling for offer for call ${activeCallId}`);
+        for (let i = 0; i < 15; i++) { // Increased to 15 chunks (4.5s)
+          const { data: call, error } = await supabase.from('calls').select('offer').eq('id', activeCallId).single();
+          if (error) {
+            console.error('[Call] Error polling for offer:', error);
+            break;
+          }
+          if (call?.offer?.sdp) { 
+            offerData = call.offer; 
+            console.log('[Call] Offer found via polling');
+            break; 
+          }
           await new Promise(r => setTimeout(r, 300));
         }
       }
       cachedOfferRef.current = null;
-      if (!offerData) throw new Error('Offer not available');
+      if (!offerData) throw new Error('Offer not available (timed out waiting for caller)');
 
       // ③ Create PeerConnection, set offer, create answer
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
-      pc.ontrack = (ev) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      pc.ontrack = (ev: any) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
+      stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
 
-      await pc.setRemoteDescription({ type: offerData.type, sdp: offerData.sdp });
+      // --- DATA CHANNEL SETUP (Receiver) ---
+      pc.ondatachannel = (event: any) => {
+        if (event.channel.label === 'video-sync') {
+          dataChannelRef.current = event.channel;
+          setupDataChannelListeners(event.channel);
+        }
+      };
+
+      console.log('[Call] Setting remote description (offer)');
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: offerData.type, sdp: offerData.sdp }));
+      
+      console.log('[Call] Creating answer');
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      
+      console.log('[Call] Waiting for ICE gathering...');
       const fullAnswer = await waitForIce(pc);
 
-      // ④ Save answer
-      await supabase.from('calls').update({ status: 'connected', answer: fullAnswer }).eq('id', activeCallId);
+      if (!activeCallId) throw new Error('Call ID lost during acceptance');
 
-    } catch (err) {
+      const { error: updateError } = await supabase.from('calls').update({ status: 'connected', answer: fullAnswer }).eq('id', activeCallId);
+      if (updateError) throw updateError;
+
+    } catch (err: any) {
       console.error('[Call] acceptCall error:', err);
+      Alert.alert('خطأ في قبول المكالمة', err.message || 'حدث خطأ غير متوقع');
       rejectCall();
     }
   };
@@ -310,12 +361,32 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (preStreamRef.current) { preStreamRef.current.getTracks().forEach(t => t.stop()); preStreamRef.current = null; }
     setRemoteStream(null);
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+    if (dataChannelRef.current) { dataChannelRef.current.close(); dataChannelRef.current = null; }
+    setLastCommand(null);
+    setIsHost(false);
     cachedOfferRef.current = null;
   };
 
   const toggleCamera = () => {
     if (localStream) {
       localStream.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
+    }
+  };
+
+  const setupDataChannelListeners = (channel: any) => {
+    channel.onopen = () => console.log('Data channel opened');
+    channel.onclose = () => console.log('Data channel closed');
+    channel.onmessage = (event: any) => {
+      try {
+        const data = JSON.parse(event.data);
+        setLastCommand(data);
+      } catch (e) { console.error('Data channel parse error:', e); }
+    };
+  };
+
+  const sendVideoSyncCommand = (command: any) => {
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      dataChannelRef.current.send(JSON.stringify(command));
     }
   };
 
@@ -327,7 +398,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CallContext.Provider value={{
       status, caller, remoteUserId, localStream, remoteStream,
       startCall, acceptCall, rejectCall, endCall, isMuted, setIsMuted,
-      isVideoCall, toggleCamera
+      isVideoCall, toggleCamera, isHost, sendVideoSyncCommand, lastCommand
     }}>
       {children}
     </CallContext.Provider>

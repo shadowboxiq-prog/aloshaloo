@@ -17,14 +17,19 @@ export default ({ config }) => {
       supportsTablet: true
     },
     android: {
+      package: "com.shadowboxiq.chatup",
       adaptiveIcon: {
-        backgroundColor: "#E6F4FE",
-        foregroundImage: "./assets/images/android-icon-foreground.png",
-        backgroundImage: "./assets/images/android-icon-background.png",
-        monochromeImage: "./assets/images/android-icon-monochrome.png"
+        backgroundColor: "#ffffff",
+        foregroundImage: "./assets/images/icon.png",
       },
+      permissions: [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "ACCESS_NETWORK_STATE",
+        "INTERNET"
+      ],
       edgeToEdgeEnabled: true,
-      predictiveBackGestureEnabled: false
     },
     web: {
       output: "static",
@@ -40,17 +45,14 @@ export default ({ config }) => {
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
-          "dark": {
-            "backgroundColor": "#000000"
-          }
+          "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "@config-plugins/react-native-webrtc"
     ],
     experiments: {
       typedRoutes: true,
-      reactCompiler: true,
-      baseUrl: baseUrl
+      reactCompiler: false
     }
   };
 };
