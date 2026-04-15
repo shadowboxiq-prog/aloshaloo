@@ -8,7 +8,7 @@ import { Colors, Radius, Spacing, Shadow } from '../constants/theme';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export const FileTransferOverlay: React.FC = () => {
-  const { transferStatus, currentTransfer, progress, acceptTransfer, rejectTransfer } = useFileTransfer();
+  const { transferStatus, currentTransfer, progress, acceptTransfer, rejectTransfer, cancelTransfer } = useFileTransfer();
 
   if (transferStatus === 'idle') return null;
 
@@ -20,6 +20,9 @@ export const FileTransferOverlay: React.FC = () => {
           {/* INCOMING REQUEST MODAL */}
           {transferStatus === 'receiving' && currentTransfer && (
             <View style={styles.card}>
+              <TouchableOpacity style={styles.closeBtn} onPress={cancelTransfer}>
+                <Ionicons name="close" size={24} color={Colors.onSurfaceVariant} />
+              </TouchableOpacity>
               <View style={styles.iconCircle}>
                 <Ionicons name="document-attach" size={32} color={Colors.primary} />
               </View>
@@ -50,6 +53,9 @@ export const FileTransferOverlay: React.FC = () => {
           {/* PROGRESS VIEW (For both Sender and Receiver) */}
           {(transferStatus === 'in_progress' || transferStatus === 'requesting') && (
             <View style={styles.card}>
+              <TouchableOpacity style={styles.closeBtn} onPress={cancelTransfer}>
+                <Ionicons name="close" size={24} color={Colors.onSurfaceVariant} />
+              </TouchableOpacity>
               <View style={styles.iconCircle}>
                 <Ionicons 
                   name={transferStatus === 'requesting' ? "hourglass" : "cloud-upload"} 
@@ -77,6 +83,9 @@ export const FileTransferOverlay: React.FC = () => {
           {/* COMPLETED / FAILED VIEW */}
           {transferStatus === 'completed' && (
             <View style={styles.card}>
+              <TouchableOpacity style={styles.closeBtn} onPress={cancelTransfer}>
+                <Ionicons name="close" size={24} color={Colors.onSurfaceVariant} />
+              </TouchableOpacity>
               <Ionicons name="checkmark-circle" size={60} color="#00c853" />
               <Text style={styles.title}>تم النقل بنجاح!</Text>
             </View>
@@ -119,5 +128,14 @@ const styles = StyleSheet.create({
   progressBarBg: { width: '100%', height: 10, backgroundColor: Colors.surfaceContainer, borderRadius: 5, overflow: 'hidden' },
   progressBarFill: { height: '100%', backgroundColor: Colors.primary },
   progressText: { marginTop: 8, fontSize: 14, fontWeight: 'bold', color: Colors.primary },
-  warningText: { fontSize: 12, color: '#ff4b4b', fontStyle: 'italic', textAlign: 'center' }
+  progressBarFill: { height: '100%', backgroundColor: Colors.primary },
+  progressText: { marginTop: 8, fontSize: 14, fontWeight: 'bold', color: Colors.primary },
+  warningText: { fontSize: 12, color: '#ff4b4b', fontStyle: 'italic', textAlign: 'center' },
+  closeBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    padding: 4,
+    zIndex: 10,
+  }
 });

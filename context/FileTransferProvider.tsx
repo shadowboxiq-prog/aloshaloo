@@ -11,6 +11,7 @@ interface FileTransferContextType {
   requestTransfer: (receptorId: string, fileUri: string, fileName: string, fileSize: number) => Promise<void>;
   acceptTransfer: (transferId: string) => Promise<void>;
   rejectTransfer: (transferId: string) => Promise<void>;
+  cancelTransfer: () => void;
 }
 
 const FileTransferContext = createContext<FileTransferContextType | undefined>(undefined);
@@ -121,8 +122,17 @@ export const FileTransferProvider: React.FC<{ children: React.ReactNode }> = ({ 
         await sendFileInChunks(fileUri, async (chunk) => {
           if (dc.readyState === 'open') dc.send(JSON.stringify(chunk));
         }, (p) => setProgress(p));
-        setTransferStatus('completed');
-        setTimeout(cleanup, 3000);
+        
+        // Wait for receiver to acknowledge before marking as completed
+        console.log('[P2P] Sent all chunks, waiting for receiver ACK...');
+      };
+
+      dc.onmessage = (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.type === 'COMPLETE_ACK') {
+          setTransferStatus('completed');
+          setTimeout(cleanup, 3000);
+        }
       };
 
       const offer = await pc.createOffer();
@@ -155,18 +165,23 @@ export const FileTransferProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
 
-      const receiver = new FileReceiver(
-        (uri) => {
-          setTransferStatus('completed');
-          Alert.alert('Success', `File saved to: ${uri}`);
-          setTimeout(cleanup, 3000);
-        },
-        (p) => setProgress(p)
-      );
-
       pc.ondatachannel = (event) => {
         const dc = event.channel;
         dataChannelRef.current = dc;
+        
+        const receiver = new FileReceiver(
+          async (uri) => {
+            setTransferStatus('completed');
+            // Send ACK back to sender
+            if (dc.readyState === 'open') {
+              dc.send(JSON.stringify({ type: 'COMPLETE_ACK' }));
+            }
+            Alert.alert('Success', `File saved to: ${uri}`);
+            setTimeout(cleanup, 3000);
+          },
+          (p) => setProgress(p)
+        );
+
         dc.onmessage = (msg) => {
           receiver.handleMessage(JSON.parse(msg.data));
         };
@@ -198,7 +213,8 @@ export const FileTransferProvider: React.FC<{ children: React.ReactNode }> = ({ 
   return (
     <FileTransferContext.Provider value={{
       transferStatus, currentTransfer, progress,
-      requestTransfer, acceptTransfer, rejectTransfer
+      requestTransfer, acceptTransfer, rejectTransfer,
+      cancelTransfer: cleanup
     }}>
       {children}
     </FileTransferContext.Provider>
