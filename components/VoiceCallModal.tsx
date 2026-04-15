@@ -158,17 +158,7 @@ export const VoiceCallModal: React.FC = () => {
                    <Text style={styles.btnLabel}>الكاميرا</Text>
                 </TouchableOpacity>
               )}
-              {isConnected && (
-                <TouchableOpacity 
-                   style={styles.smallBtn} 
-                   onPress={() => {
-                     import('expo-router').then(({ router }) => router.push('/watch-party'));
-                   }}
-                >
-                   <Ionicons name="tv-outline" size={24} color={Colors.white} />
-                   <Text style={styles.btnLabel}>مشاهدة</Text>
-                </TouchableOpacity>
-              )}
+
             </View>
           </View>
         </View>

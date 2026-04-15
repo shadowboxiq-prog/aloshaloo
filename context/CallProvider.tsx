@@ -82,14 +82,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoCall, setIsVideoCall] = useState(false);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
-  const [isHost, setIsHost] = useState(false);
-  const [lastCommand, setLastCommand] = useState<{ action: 'PLAY' | 'PAUSE' | 'SEEK', time: number, videoId?: string } | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const subscriptionRef = useRef<any>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const currentUidRef = useRef<string | null>(null);
-  const dataChannelRef = useRef<any>(null);
 
   // Pre-cached data for fast accept
   const cachedOfferRef = useRef<{ type: string; sdp: string } | null>(null);
@@ -236,11 +233,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // --- DATA CHANNEL SETUP (Host) ---
-      const dc = pc.createDataChannel('video-sync');
-      dataChannelRef.current = dc;
-      setupDataChannelListeners(dc);
-      setIsHost(true);
+      // pc.ontrack = ... (already there)
 
       // ③ INSERT call into DB immediately (don't wait for ICE!)
       const icePromise = waitForIce(pc); // runs in parallel
@@ -307,13 +300,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pc.ontrack = (ev: any) => { if (ev.streams[0]) { setRemoteStream(ev.streams[0]); playRemoteAudio(ev.streams[0]); } };
       stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
 
-      // --- DATA CHANNEL SETUP (Receiver) ---
-      pc.ondatachannel = (event: any) => {
-        if (event.channel.label === 'video-sync') {
-          dataChannelRef.current = event.channel;
-          setupDataChannelListeners(event.channel);
-        }
-      };
+      // pc.ontrack = ... (already there)
 
       console.log('[Call] Setting remote description (offer)');
       await pc.setRemoteDescription(new RTCSessionDescription({ type: offerData.type, sdp: offerData.sdp }));
@@ -361,32 +348,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (preStreamRef.current) { preStreamRef.current.getTracks().forEach(t => t.stop()); preStreamRef.current = null; }
     setRemoteStream(null);
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
-    if (dataChannelRef.current) { dataChannelRef.current.close(); dataChannelRef.current = null; }
-    setLastCommand(null);
-    setIsHost(false);
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     cachedOfferRef.current = null;
   };
 
   const toggleCamera = () => {
     if (localStream) {
       localStream.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
-    }
-  };
-
-  const setupDataChannelListeners = (channel: any) => {
-    channel.onopen = () => console.log('Data channel opened');
-    channel.onclose = () => console.log('Data channel closed');
-    channel.onmessage = (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        setLastCommand(data);
-      } catch (e) { console.error('Data channel parse error:', e); }
-    };
-  };
-
-  const sendVideoSyncCommand = (command: any) => {
-    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-      dataChannelRef.current.send(JSON.stringify(command));
     }
   };
 
@@ -398,7 +366,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CallContext.Provider value={{
       status, caller, remoteUserId, localStream, remoteStream,
       startCall, acceptCall, rejectCall, endCall, isMuted, setIsMuted,
-      isVideoCall, toggleCamera, isHost, sendVideoSyncCommand, lastCommand
+      isVideoCall, toggleCamera
     }}>
       {children}
     </CallContext.Provider>

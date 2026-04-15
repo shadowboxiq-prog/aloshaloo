@@ -114,7 +114,6 @@ export default function RootLayout() {
             <Stack.Screen name="profile" options={{ title: 'Profile' }} />
             <Stack.Screen name="settings" options={{ title: 'Settings' }} />
             <Stack.Screen name="add-friend" options={{ title: 'Add Friend' }} />
-            <Stack.Screen name="watch-party" options={{ title: 'Watch Party' }} />
           </Stack>
           <VoiceCallModal />
         </PresenceProvider>
